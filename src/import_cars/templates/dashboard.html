@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+
+{% block top_actions %}
+<button class="btn-primary" form="compare-form" type="submit">
+  <span class="material-symbols-outlined">play_arrow</span>
+  Run Comparison
+</button>
+<a class="btn-secondary" id="export-link" href="#" target="_blank" rel="noopener">
+  <span class="material-symbols-outlined">download</span>
+  Export CSV
+</a>
+{% endblock %}
+
+{% block content %}
+<main class="main">
+  <section class="hero">
+    <div>
+      <div class="eyebrow">{{ page_eyebrow }}</div>
+      <h1>{{ page_title }}</h1>
+    </div>
+    <div class="hero-right">
+      <div class="eyebrow">Last Updated</div>
+      <div id="last-updated" class="status-strong">Waiting</div>
+    </div>
+  </section>
+
+  {% include "partials/summary_cards.html" %}
+  {% include "partials/compare_workspace.html" %}
+</main>
+{% include "partials/detail_drawer.html" %}
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', path='dashboard.js') }}"></script>
+{% endblock %}

@@ -92,6 +92,10 @@ class NormalizedListing(BaseModel):
     interior_material: Optional[str] = None
     emission_class: Optional[str] = None
     co2_emissions_g_km: Optional[int] = None
+    co2_original_g_km: Optional[int] = None
+    co2_inferred_g_km: Optional[int] = None
+    co2_source_type: Optional[str] = None
+    co2_confidence: Optional[float] = None
     consumption_l_100km: Optional[Consumption] = None
     features: List[str] = Field(default_factory=list)
     description: Optional[str] = None
@@ -104,6 +108,20 @@ class NormalizedListing(BaseModel):
     service_history: Optional[bool] = None
     accident_free: Optional[bool] = None
     metadata: ListingMetadata = Field(default_factory=ListingMetadata)
+    vehicle_signature: Optional[str] = None
+    variant_key: Optional[str] = None
+    market_key: Optional[str] = None
+    comparable_match_level: Optional[str] = None
+    es_exact_sample_size: Optional[int] = None
+    es_near_sample_size: Optional[int] = None
+    es_broad_sample_size: Optional[int] = None
+    es_market_avg: Optional[float] = None
+    es_market_median: Optional[float] = None
+    es_market_min: Optional[float] = None
+    es_sample_size: Optional[int] = None
+    best_break_even: Optional[float] = None
+    potential_margin_avg: Optional[float] = None
+    potential_margin_min: Optional[float] = None
     import_ready_score: Optional[float] = None
 
 

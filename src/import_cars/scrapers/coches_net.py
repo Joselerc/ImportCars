@@ -199,6 +199,36 @@ class CochesNetScraper(BaseScraper):
         
         return payload
 
+    def _extract_images(self, payload: Any) -> List[str]:
+        urls: List[str] = []
+        seen = set()
+
+        def add(value: Any) -> None:
+            if not isinstance(value, str) or value in seen:
+                return
+            lowered = value.lower()
+            if not value.startswith("http"):
+                return
+            if not any(token in lowered for token in ("image", "photo", "jpg", "jpeg", "png", "webp")):
+                return
+            seen.add(value)
+            urls.append(value)
+
+        def walk(node: Any) -> None:
+            if isinstance(node, dict):
+                for key, value in node.items():
+                    if isinstance(value, str) and any(token in key.lower() for token in ("image", "photo", "gallery", "pic")):
+                        add(value)
+                    walk(value)
+            elif isinstance(node, list):
+                for item in node:
+                    walk(item)
+            else:
+                add(node)
+
+        walk(payload)
+        return urls[:8]
+
     async def _fetch_results_page(self, payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         # Headers específicos basados en la petición real
         headers = {
@@ -404,6 +434,7 @@ class CochesNetScraper(BaseScraper):
                 power_kw=int(data.get("hp") / 1.36) if data.get("hp") else None,
                 fuel_type=data.get("fuelType"),
                 engine_displacement_cc=data.get("cubicCapacity"),
+                images=self._extract_images(data),
                 location=location,
                 seller=seller,
                 metadata=metadata

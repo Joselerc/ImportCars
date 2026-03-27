@@ -109,6 +109,10 @@ class ExcelExporter:
                 'title': listing.title,
                 'make': listing.make,
                 'model': listing.model,
+                'vehicle_signature': listing.vehicle_signature,
+                'variant_key': listing.variant_key,
+                'market_key': listing.market_key,
+                'comparable_match_level': listing.comparable_match_level,
                 
                 # Precios (campos unificados)
                 'price_gross_eur': listing.price_eur,  # Precio bruto
@@ -134,6 +138,21 @@ class ExcelExporter:
                 
                 # Emisiones y consumo
                 'co2_emissions_g_km': listing.co2_emissions_g_km,
+                'co2_original_g_km': listing.co2_original_g_km,
+                'co2_inferred_g_km': listing.co2_inferred_g_km,
+                'co2_source_type': listing.co2_source_type,
+                'co2_confidence': listing.co2_confidence,
+                'es_market_avg': listing.es_market_avg,
+                'es_market_median': listing.es_market_median,
+                'es_market_min': listing.es_market_min,
+                'es_sample_size': listing.es_sample_size,
+                'es_exact_sample_size': listing.es_exact_sample_size,
+                'es_near_sample_size': listing.es_near_sample_size,
+                'es_broad_sample_size': listing.es_broad_sample_size,
+                'best_break_even': listing.best_break_even,
+                'potential_margin_avg': listing.potential_margin_avg,
+                'potential_margin_min': listing.potential_margin_min,
+                'opportunity_score': listing.import_ready_score,
                 'consumption_combined_l_100km': listing.consumption_l_100km.combined if listing.consumption_l_100km else None,
                 'consumption_urban_l_100km': listing.consumption_l_100km.urban if listing.consumption_l_100km else None,
                 'consumption_highway_l_100km': listing.consumption_l_100km.highway if listing.consumption_l_100km else None,

@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+
+{% block top_actions %}
+<a class="btn-secondary" href="{{ url_for('dashboard') }}">
+  <span class="material-symbols-outlined">arrow_back</span>
+  Back To Dashboard
+</a>
+{% endblock %}
+
+{% block shell_class %}shell-no-drawer{% endblock %}
+
+{% block content %}
+<main class="main reports-main">
+  <section class="hero">
+    <div>
+      <div class="eyebrow">{{ page_eyebrow }}</div>
+      <h1>{{ page_title }}</h1>
+    </div>
+    <div class="hero-right">
+      <div class="eyebrow">Available Files</div>
+      <div class="status-strong">{{ report_count }}</div>
+    </div>
+  </section>
+
+  <section class="summary reports-summary">
+    <article class="summary-card">
+      <div class="label">Total Exports</div>
+      <div class="summary-value">{{ report_count }}</div>
+      <div class="summary-sub">files in exports</div>
+    </article>
+    <article class="summary-card">
+      <div class="label">CSV Reports</div>
+      <div class="summary-value">{{ csv_count }}</div>
+      <div class="summary-sub">comparison snapshots</div>
+    </article>
+    <article class="summary-card tertiary">
+      <div class="label">Excel Reports</div>
+      <div class="summary-value">{{ xlsx_count }}</div>
+      <div class="summary-sub">rich exports</div>
+    </article>
+  </section>
+
+  <section class="panel">
+    <h2 class="section-title"><span class="material-symbols-outlined">folder_open</span>Recent Reports</h2>
+    {% if report_items %}
+    <div class="report-list">
+      {% for item in report_items %}
+      <article class="report-card">
+        <div>
+          <div class="label">{{ item.kind|upper }}</div>
+          <h3>{{ item.name }}</h3>
+          <div class="report-meta">{{ item.modified }} · {{ item.size_kb }} KB</div>
+        </div>
+        <a class="btn-secondary report-link" href="{{ item.url }}" target="_blank" rel="noopener">Open Export</a>
+      </article>
+      {% endfor %}
+    </div>
+    {% else %}
+    <div class="empty">Todavia no hay exports. Ejecuta una comparacion y vuelve aqui.</div>
+    {% endif %}
+  </section>
+</main>
+{% endblock %}

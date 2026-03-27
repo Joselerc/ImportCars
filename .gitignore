@@ -17,3 +17,7 @@ debug_screenshot.png
 .idea/
 *.swp
 *.swo
+
+# Local outputs / scratch data
+exports/
+Models Full coches.net*.txt

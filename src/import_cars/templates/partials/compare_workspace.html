@@ -1,0 +1,171 @@
+<section class="body-grid">
+  <div class="panel">
+    <h2 class="section-title"><span class="material-symbols-outlined">filter_list</span>Intelligence Filters</h2>
+    <div class="tabs">
+      <button class="mode-btn active" data-mode="simple" type="button">Simple Mode</button>
+      <button class="mode-btn" data-mode="advanced" type="button">Advanced Mode</button>
+    </div>
+
+    <form id="compare-form" class="stack">
+      <input id="mode" name="mode" type="hidden" value="simple">
+
+      <div class="mode-pane" data-pane="simple">
+        <div class="stack">
+          <div class="field"><label><span class="field-title">Marca</span><input name="make" placeholder="BMW"></label></div>
+          <div class="field"><label><span class="field-title">Modelo</span><input name="model" placeholder="X5"></label></div>
+          <div class="grid2">
+            <div class="field"><label><span class="field-title">Combustible</span><input name="fuel_types" placeholder="diesel"></label></div>
+            <div class="field"><label><span class="field-title">Transmision</span><input name="transmissions" placeholder="automatico"></label></div>
+          </div>
+          <div class="grid2">
+            <div class="field"><label><span class="field-title">Precio Min</span><input name="min_price" type="number" placeholder="20000"></label></div>
+            <div class="field"><label><span class="field-title">Precio Max</span><input name="max_price" type="number" placeholder="40000"></label></div>
+          </div>
+          <div class="grid2">
+            <div class="field"><label><span class="field-title">Ano Min</span><input name="min_year" type="number" placeholder="2018"></label></div>
+            <div class="field"><label><span class="field-title">Ano Max</span><input name="max_year" type="number" placeholder="2024"></label></div>
+          </div>
+          <div class="grid2">
+            <div class="field"><label><span class="field-title">Km Min</span><input name="min_mileage" type="number" placeholder="0"></label></div>
+            <div class="field"><label><span class="field-title">Km Max</span><input name="max_mileage" type="number" placeholder="120000"></label></div>
+          </div>
+          <div class="grid2">
+            <div class="field"><label><span class="field-title">HP Min</span><input name="min_power" type="number" placeholder="150"></label></div>
+            <div class="field"><label><span class="field-title">HP Max</span><input name="max_power" type="number" placeholder="400"></label></div>
+          </div>
+          <div class="checkboxes">
+            <label class="checkbox"><input name="dealer_only" type="checkbox">Dealers only</label>
+            <label class="checkbox"><input name="private_only" type="checkbox">Private only</label>
+          </div>
+        </div>
+      </div>
+
+      <div class="mode-pane hidden" data-pane="advanced">
+        <div class="stack">
+          <div class="country">
+            <div class="section-title split-title"><span class="material-symbols-outlined">flag</span>Alemania / mobile.de</div>
+            <div class="stack">
+              <div class="grid2">
+                <div class="field"><label><span class="field-title">Marca</span><input name="de_make" placeholder="BMW"></label></div>
+                <div class="field"><label><span class="field-title">Modelo</span><input name="de_model" placeholder="X5"></label></div>
+              </div>
+              <div class="grid2">
+                <div class="field"><label><span class="field-title">Precio Min</span><input name="de_min_price" type="number"></label></div>
+                <div class="field"><label><span class="field-title">Precio Max</span><input name="de_max_price" type="number"></label></div>
+              </div>
+              <div class="grid2">
+                <div class="field"><label><span class="field-title">Ano Min</span><input name="de_min_year" type="number"></label></div>
+                <div class="field"><label><span class="field-title">Ano Max</span><input name="de_max_year" type="number"></label></div>
+              </div>
+              <div class="grid2">
+                <div class="field"><label><span class="field-title">Km Min</span><input name="de_min_mileage" type="number"></label></div>
+                <div class="field"><label><span class="field-title">Km Max</span><input name="de_max_mileage" type="number"></label></div>
+              </div>
+              <div class="grid2">
+                <div class="field"><label><span class="field-title">HP Min</span><input name="de_min_power" type="number"></label></div>
+                <div class="field"><label><span class="field-title">HP Max</span><input name="de_max_power" type="number"></label></div>
+              </div>
+              <div class="grid3">
+                <div class="field"><label><span class="field-title">Fuel</span><input name="de_fuel_types"></label></div>
+                <div class="field"><label><span class="field-title">Trans</span><input name="de_transmissions"></label></div>
+                <div class="field"><label><span class="field-title">Limit</span><input name="de_limit" type="number" placeholder="10"></label></div>
+              </div>
+              <div class="checkboxes">
+                <label class="checkbox"><input name="de_dealer_only" type="checkbox">Dealers only</label>
+                <label class="checkbox"><input name="de_private_only" type="checkbox">Private only</label>
+              </div>
+            </div>
+          </div>
+
+          <div class="country">
+            <div class="section-title split-title"><span class="material-symbols-outlined">flag</span>Espana / coches.net</div>
+            <div class="stack">
+              <div class="grid2">
+                <div class="field"><label><span class="field-title">Marca</span><input name="es_make" placeholder="BMW"></label></div>
+                <div class="field"><label><span class="field-title">Modelo</span><input name="es_model" placeholder="X5 xDrive"></label></div>
+              </div>
+              <div class="grid2">
+                <div class="field"><label><span class="field-title">Precio Min</span><input name="es_min_price" type="number"></label></div>
+                <div class="field"><label><span class="field-title">Precio Max</span><input name="es_max_price" type="number"></label></div>
+              </div>
+              <div class="grid2">
+                <div class="field"><label><span class="field-title">Ano Min</span><input name="es_min_year" type="number"></label></div>
+                <div class="field"><label><span class="field-title">Ano Max</span><input name="es_max_year" type="number"></label></div>
+              </div>
+              <div class="grid2">
+                <div class="field"><label><span class="field-title">Km Min</span><input name="es_min_mileage" type="number"></label></div>
+                <div class="field"><label><span class="field-title">Km Max</span><input name="es_max_mileage" type="number"></label></div>
+              </div>
+              <div class="grid2">
+                <div class="field"><label><span class="field-title">HP Min</span><input name="es_min_power" type="number"></label></div>
+                <div class="field"><label><span class="field-title">HP Max</span><input name="es_max_power" type="number"></label></div>
+              </div>
+              <div class="grid3">
+                <div class="field"><label><span class="field-title">Fuel</span><input name="es_fuel_types"></label></div>
+                <div class="field"><label><span class="field-title">Trans</span><input name="es_transmissions"></label></div>
+                <div class="field"><label><span class="field-title">Limit</span><input name="es_limit" type="number" placeholder="10"></label></div>
+              </div>
+              <div class="checkboxes">
+                <label class="checkbox"><input name="es_dealer_only" type="checkbox">Dealers only</label>
+                <label class="checkbox"><input name="es_private_only" type="checkbox">Private only</label>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="field"><label><span class="field-title">Default Limit</span><input name="limit" type="number" min="1" max="50" value="10"></label></div>
+    </form>
+
+    <button class="btn-primary full-width" form="compare-form" type="submit">
+      <span class="material-symbols-outlined">bolt</span>
+      Refine Intelligence
+    </button>
+    <div class="status" id="status">Listo para analizar.</div>
+    <div class="logic">
+      <strong>Exact</strong> exige una variante muy cercana.
+      <strong>Near</strong> tolera diferencias menores.
+      <strong>Broad</strong> compara dentro de la misma familia de mercado.
+    </div>
+  </div>
+
+  <div>
+    <section class="panel">
+      <div class="opps-head">
+        <h2 class="section-title no-margin"><span class="material-symbols-outlined">query_stats</span>Top Import Opportunities</h2>
+        <div class="eyebrow">Sorted by opportunity score</div>
+      </div>
+      <div class="opps" id="opps">
+        <div class="empty">Todavia no hay analisis cargado. Ejecuta una comparacion.</div>
+      </div>
+    </section>
+
+    <section class="panel spacer-top">
+      <h2 class="section-title"><span class="material-symbols-outlined">table_view</span>Detailed Results</h2>
+      <div class="table-wrap">
+        <table id="results-table">
+          <thead>
+            <tr>
+              <th>Source</th>
+              <th>Title</th>
+              <th>Variant</th>
+              <th>Year</th>
+              <th>Fuel</th>
+              <th>Price</th>
+              <th>CO2</th>
+              <th>CO2 Source</th>
+              <th>Match</th>
+              <th>ES Avg</th>
+              <th>Break-even</th>
+              <th>Margin</th>
+              <th>Score</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td colspan="13" class="muted-cell">Sin resultados todavia.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </div>
+</section>

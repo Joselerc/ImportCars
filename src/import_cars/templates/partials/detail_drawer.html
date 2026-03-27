@@ -1,0 +1,71 @@
+<aside class="drawer" id="drawer">
+  <div class="drawer-head">
+    <div>
+      <div class="eyebrow">Import Opportunity Detail</div>
+      <h2 id="detail-title">Vehicle Intelligence</h2>
+    </div>
+    <button class="drawer-close" id="drawer-close" type="button"><span class="material-symbols-outlined">close</span></button>
+  </div>
+
+  <div class="drawer-hero" id="drawer-hero">
+    <div class="drawer-image" id="drawer-image"></div>
+    <div class="drawer-overlay">
+      <div>
+        <div class="metric">Confidence</div>
+        <div id="detail-confidence" class="badge missing">Waiting</div>
+      </div>
+      <div class="drawer-score">
+        <div class="metric">Opportunity score</div>
+        <div class="score-number" id="detail-score-big">--</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="specs">
+    <div><div class="metric">Year</div><div class="metric-value" id="spec-year">--</div></div>
+    <div><div class="metric">Mileage</div><div class="metric-value" id="spec-mileage">--</div></div>
+    <div><div class="metric">Power</div><div class="metric-value" id="spec-power">--</div></div>
+    <div><div class="metric">Fuel</div><div class="metric-value" id="spec-fuel">--</div></div>
+  </div>
+
+  <div class="action-stack">
+    <a class="btn-primary full-width" id="detail-link" href="#" target="_blank" rel="noopener">View Listing</a>
+    <a class="btn-secondary full-width" id="detail-export-link" href="#" target="_blank" rel="noopener">Open CSV Export</a>
+  </div>
+
+  <section class="drawer-block">
+    <h3 class="section-title"><span class="material-symbols-outlined">account_balance</span>Import Cost Breakdown</h3>
+    <div class="row"><span>DE purchase price</span><span class="value" id="cost-price">--</span></div>
+    <div class="row"><span>Purchase case</span><span class="value" id="cost-case">--</span></div>
+    <div class="row"><span>ITP</span><span class="value" id="cost-itp">--</span></div>
+    <div class="row"><span>IEDMT</span><span class="value" id="cost-iedmt">--</span></div>
+    <div class="row"><span>Transport</span><span class="value" id="cost-transport">--</span></div>
+    <div class="row"><span>Paperwork</span><span class="value" id="cost-paperwork">--</span></div>
+    <div class="total"><span>Total cost to Spain</span><strong id="cost-total">--</strong></div>
+    <div class="profit">
+      <div class="metric accent-secondary">Expected Profit Margin</div>
+      <div class="value" id="detail-margin">--</div>
+      <div class="summary-sub" id="detail-market-ref">vs ES market average</div>
+    </div>
+  </section>
+
+  <section class="drawer-block">
+    <h3 class="section-title"><span class="material-symbols-outlined">compare_arrows</span>Comparable Matching</h3>
+    <div class="row"><span>Match level</span><span class="value" id="detail-match">--</span></div>
+    <div class="row"><span>Exact sample size</span><span class="value" id="detail-exact">--</span></div>
+    <div class="row"><span>Near sample size</span><span class="value" id="detail-near">--</span></div>
+    <div class="row"><span>Broad sample size</span><span class="value" id="detail-broad">--</span></div>
+    <div class="row"><span>Total sample size</span><span class="value" id="detail-sample">--</span></div>
+    <div class="row"><span>ES market average</span><span class="value" id="detail-es-avg">--</span></div>
+    <div class="row"><span>ES market median</span><span class="value" id="detail-es-median">--</span></div>
+  </section>
+
+  <section class="drawer-block">
+    <h3 class="section-title"><span class="material-symbols-outlined">psychology</span>Intelligence Logic</h3>
+    <div class="note">
+      Exact = misma motorizacion y comparables muy cercanos.
+      Near = variante compatible con pequenas diferencias.
+      Broad = referencia de mercado mas amplia para no perder senal.
+    </div>
+  </section>
+</aside>

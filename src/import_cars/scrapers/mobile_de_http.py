@@ -81,7 +81,11 @@ class MobileDeHttpScraper:
                 break
             
             # Obtener detalles de cada anuncio
-            listings = self._fetch_details_parallel(ids, max_workers=10)
+            listings = [
+                listing
+                for listing in self._fetch_details_parallel(ids, max_workers=10)
+                if self._matches_filters(listing, filters)
+            ]
             all_listings.extend(listings)
             
             print(f"   OK - {len(listings)} anuncios procesados (Total: {len(all_listings)}" + (f"/{total_available}" if total_available else "") + ")")
@@ -112,6 +116,7 @@ class MobileDeHttpScraper:
             listings=all_listings,
             total_listings=total_available or len(all_listings),
             result_page=page,
+            result_page_size=len(all_listings),
             has_next=False,
         )
 
@@ -134,9 +139,55 @@ class MobileDeHttpScraper:
 
     def _extract_ids_from_listing(self, html_content: str) -> List[str]:
         """Extraer IDs de anuncios del HTML de listado"""
-        # Buscar patrón: detalles.html?id=XXXXXXXX
-        ids = set(re.findall(r"detalles\.html\?id=(\d{6,})", html_content))
-        return list(ids)
+        tree = HTMLParser(html_content)
+        ids = []
+        seen = set()
+
+        for node in tree.css("a[href*='detalles.html?id=']"):
+            href = node.attributes.get("href", "")
+            match = re.search(r"detalles\.html\?id=(\d{6,})", href)
+            if match and match.group(1) not in seen:
+                seen.add(match.group(1))
+                ids.append(match.group(1))
+
+        return ids
+
+    def _matches_filters(self, listing: NormalizedListing, filters: UnifiedFilters) -> bool:
+        """Filtra resultados HTTP para evitar anuncios ajenos a la búsqueda."""
+        if filters.make and (listing.make or "").upper() != filters.make.upper():
+            return False
+
+        if filters.model:
+            haystack = " ".join(filter(None, [listing.model, listing.title])).upper()
+            if filters.model.upper() not in haystack:
+                return False
+
+        if filters.price_range and listing.price_eur is not None:
+            if filters.price_range.min_price and listing.price_eur < filters.price_range.min_price:
+                return False
+            if filters.price_range.max_price and listing.price_eur > filters.price_range.max_price:
+                return False
+
+        if filters.year_range and listing.first_registration:
+            year = listing.first_registration.year
+            if filters.year_range.min_year and year < filters.year_range.min_year:
+                return False
+            if filters.year_range.max_year and year > filters.year_range.max_year:
+                return False
+
+        if filters.mileage_range and listing.mileage_km is not None:
+            if filters.mileage_range.min_mileage and listing.mileage_km < filters.mileage_range.min_mileage:
+                return False
+            if filters.mileage_range.max_mileage and listing.mileage_km > filters.mileage_range.max_mileage:
+                return False
+
+        if filters.power_range and listing.power_hp is not None:
+            if filters.power_range.min_power_hp and listing.power_hp < filters.power_range.min_power_hp:
+                return False
+            if filters.power_range.max_power_hp and listing.power_hp > filters.power_range.max_power_hp:
+                return False
+
+        return True
 
     def _has_next_page(self, html_content: str) -> bool:
         """Verificar si hay página siguiente"""
@@ -179,6 +230,7 @@ class MobileDeHttpScraper:
     def _parse_detail_page(self, html_content: str, vehicle_id: str, url: str) -> Optional[NormalizedListing]:
         """Parsear página de detalle completa"""
         tree = HTMLParser(html.unescape(html_content))
+        images = self._extract_images(tree, html_content)
         
         # Título - h2.typography_headline__yJCAO
         title = None
@@ -273,12 +325,41 @@ class MobileDeHttpScraper:
             co2_emissions_g_km=tech_data.get("co2_emissions_g_km"),
             consumption_l_100km=consumption,
             description=tech_data.get("description"),
+            images=images,
             doors=tech_data.get("doors"),
             color_exterior=tech_data.get("color_exterior"),
             previous_owners=tech_data.get("previous_owners"),
             seller=seller_info,
             metadata=metadata,
         )
+
+    def _extract_images(self, tree: HTMLParser, html_content: str) -> List[str]:
+        """Extraer imágenes relevantes del anuncio."""
+        candidates: List[str] = []
+        seen = set()
+
+        def add(url: Optional[str]) -> None:
+            if not url or url in seen:
+                return
+            if not url.startswith("http"):
+                return
+            lowered = url.lower()
+            if any(token in lowered for token in ("logo", "icon", "sprite", "dealer-rating")):
+                return
+            seen.add(url)
+            candidates.append(url)
+
+        for node in tree.css("meta[property='og:image'], meta[name='twitter:image']"):
+            add(node.attributes.get("content"))
+
+        for node in tree.css("img"):
+            add(node.attributes.get("src"))
+            add(node.attributes.get("data-src"))
+
+        for match in re.findall(r'https://[^"\']+\.(?:jpg|jpeg|png|webp)[^"\']*', html_content, re.IGNORECASE):
+            add(match)
+
+        return candidates[:8]
 
     def _extract_seller_info(self, tree: HTMLParser) -> Optional[dict]:
         """Extraer información del vendedor"""

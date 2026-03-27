@@ -17,15 +17,18 @@ from rich.table import Table
 # Configurar console para Windows
 console = Console(force_terminal=True, legacy_windows=False)
 
+from .analysis import apply_opportunity_analysis
+from .enrichment import Co2Enricher
 from .exporters import ExcelExporter, CSVExporter
 from .filters import UnifiedFilters, FuelType, Transmission, SortBy, PriceRange, YearRange, MileageRange, PowerRange
-from .scrapers import CochesNetScraper, MobileDeScraper, MobileDeHttpScraper
+from .scrapers import CochesNetScraper, MobileDeHttpScraper
 
 # Configurar logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = typer.Typer(help="Scraper CLI avanzado para mobile.de y coches.net con filtros y exportación")
+co2_enricher = Co2Enricher()
 
 
 def _parse_fuel_types(fuel_types_str: Optional[str]) -> Optional[List[FuelType]]:
@@ -105,6 +108,14 @@ def _parse_sort_by(sort_str: Optional[str]) -> SortBy:
     return sort_map.get(sort_str.lower(), SortBy.RELEVANCE)
 
 
+def _enrich_listings(listings):
+    enriched = co2_enricher.enrich(listings)
+    inferred = sum(1 for listing in enriched if listing.co2_source_type in {"signature_exact", "signature_near"})
+    if inferred:
+        console.print(f"[cyan]CO2 completado automaticamente en {inferred} anuncios[/cyan]")
+    return enriched
+
+
 async def _scrape_with_filters(
     scraper_class,
     filters: UnifiedFilters,
@@ -117,7 +128,7 @@ async def _scrape_with_filters(
     scraper = scraper_class()
     
     # Detectar nombre del source
-    if scraper_class == MobileDeScraper or scraper_class == MobileDeHttpScraper:
+    if scraper_class == MobileDeHttpScraper:
         source_name = "mobile.de"
     else:
         source_name = "coches.net"
@@ -133,6 +144,8 @@ async def _scrape_with_filters(
             # Scraper síncrono (como MobileDeHttpScraper)
             result = scraper.search(query=filters, limit=limit)
         
+        result.listings = _enrich_listings(result.listings)
+
         if not result.listings:
             console.print(f"[yellow]No se encontraron resultados para los filtros especificados en {source_name}[/yellow]")
             return
@@ -345,11 +358,16 @@ def compare(
         console.print("[bold blue]Comparando precios entre mobile.de y coches.net...[/bold blue]")
         
         # Scraper ambas fuentes en paralelo
-        mobile_scraper = MobileDeScraper()
+        mobile_scraper = MobileDeHttpScraper()
         coches_scraper = CochesNetScraper()
-        
+
+        loop = asyncio.get_event_loop()
+        mobile_task = loop.run_in_executor(
+            None,
+            lambda: mobile_scraper.search(query=filters, limit=limit)
+        )
         mobile_result, coches_result = await asyncio.gather(
-            mobile_scraper.search(query=filters, limit=limit),
+            mobile_task,
             coches_scraper.search(query=filters, limit=limit),
             return_exceptions=True
         )
@@ -360,18 +378,33 @@ def compare(
         if isinstance(mobile_result, Exception):
             console.print(f"[red]Error en mobile.de: {mobile_result}[/red]")
         else:
+            mobile_result.listings = _enrich_listings(mobile_result.listings)
             all_listings.extend(mobile_result.listings)
             console.print(f"[green]mobile.de: {len(mobile_result.listings)} anuncios[/green]")
         
         if isinstance(coches_result, Exception):
             console.print(f"[red]Error en coches.net: {coches_result}[/red]")
         else:
+            coches_result.listings = _enrich_listings(coches_result.listings)
             all_listings.extend(coches_result.listings)
             console.print(f"[green]coches.net: {len(coches_result.listings)} anuncios[/green]")
         
         if not all_listings:
             console.print("[yellow]No se encontraron anuncios en ninguna fuente[/yellow]")
             return
+
+        mobile_listings = [l for l in all_listings if l.source == "mobile_de"]
+        coches_listings = [l for l in all_listings if l.source == "coches_net"]
+        break_even_data = {}
+        for listing in mobile_listings:
+            if listing.price_eur:
+                break_even_data[listing.listing_id] = {
+                    "particular": listing.price_eur * 1.04 if listing.seller and listing.seller.type == "private" else listing.price_eur,
+                    "empresa_iva": listing.price_eur,
+                    "empresa_margen": listing.price_eur,
+                }
+
+        opportunities = apply_opportunity_analysis(mobile_listings, coches_listings, break_even_data)
         
         # Exportar comparación
         exporter = ExcelExporter()
@@ -381,9 +414,6 @@ def compare(
         console.print(f"[green]Comparación exportada a: {filepath}[/green]")
         
         # Mostrar estadísticas
-        mobile_listings = [l for l in all_listings if l.source == "mobile_de"]
-        coches_listings = [l for l in all_listings if l.source == "coches_net"]
-        
         table = Table(title="Comparación de Precios")
         table.add_column("Fuente", style="cyan")
         table.add_column("Anuncios", style="magenta")
@@ -408,6 +438,26 @@ def compare(
                 table.add_row(source_name, "0", "N/A", "N/A", "N/A")
         
         console.print(table)
+
+        if opportunities:
+            opp_table = Table(title="Top Oportunidades")
+            opp_table.add_column("Modelo", style="cyan")
+            opp_table.add_column("Muestras ES", justify="right")
+            opp_table.add_column("Precio ES medio", justify="right", style="green")
+            opp_table.add_column("Break-even", justify="right", style="magenta")
+            opp_table.add_column("Margen", justify="right", style="yellow")
+            opp_table.add_column("Score", justify="right", style="red")
+            for opp in opportunities[:5]:
+                listing = opp["listing"]
+                opp_table.add_row(
+                    f"{listing.make} {listing.model}",
+                    str(listing.es_sample_size or 0),
+                    f"{listing.es_market_avg:,.0f} EUR" if listing.es_market_avg else "N/A",
+                    f"{listing.best_break_even:,.0f} EUR" if listing.best_break_even else "N/A",
+                    f"{listing.potential_margin_avg:,.0f} EUR" if listing.potential_margin_avg else "N/A",
+                    f"{listing.import_ready_score:,.0f}" if listing.import_ready_score is not None else "N/A",
+                )
+            console.print(opp_table)
     
     asyncio.run(_compare())
 
@@ -422,44 +472,44 @@ def comparar(
     limit: Optional[int] = typer.Option(50, help="Límite por fuente (modo simple)"),
     
     # ========== ALEMANIA (mobile.de) - Parámetros específicos ==========
-    de_make: Optional[str] = typer.Option(None, help="🇩🇪 Marca para Alemania"),
-    de_model: Optional[str] = typer.Option(None, help="🇩🇪 Modelo para Alemania"),
-    de_min_price: Optional[float] = typer.Option(None, help="🇩🇪 Precio mínimo (EUR)"),
-    de_max_price: Optional[float] = typer.Option(None, help="🇩🇪 Precio máximo (EUR)"),
-    de_min_year: Optional[int] = typer.Option(None, help="🇩🇪 Año mínimo"),
-    de_max_year: Optional[int] = typer.Option(None, help="🇩🇪 Año máximo"),
-    de_min_mileage: Optional[int] = typer.Option(None, help="🇩🇪 Kilometraje mínimo"),
-    de_max_mileage: Optional[int] = typer.Option(None, help="🇩🇪 Kilometraje máximo"),
-    de_min_power: Optional[int] = typer.Option(None, help="🇩🇪 Potencia mínima (HP)"),
-    de_max_power: Optional[int] = typer.Option(None, help="🇩🇪 Potencia máxima (HP)"),
-    de_fuel_types: Optional[str] = typer.Option(None, help="🇩🇪 Combustibles"),
-    de_transmissions: Optional[str] = typer.Option(None, help="🇩🇪 Transmisiones"),
-    de_dealer_only: bool = typer.Option(False, help="🇩🇪 Solo concesionarios"),
-    de_private_only: bool = typer.Option(False, help="🇩🇪 Solo particulares"),
-    de_limit: Optional[int] = typer.Option(None, help="🇩🇪 Límite de anuncios"),
+    de_make: Optional[str] = typer.Option(None, help="Marca para Alemania"),
+    de_model: Optional[str] = typer.Option(None, help="Modelo para Alemania"),
+    de_min_price: Optional[float] = typer.Option(None, help="Precio mínimo Alemania (EUR)"),
+    de_max_price: Optional[float] = typer.Option(None, help="Precio máximo Alemania (EUR)"),
+    de_min_year: Optional[int] = typer.Option(None, help="Año mínimo Alemania"),
+    de_max_year: Optional[int] = typer.Option(None, help="Año máximo Alemania"),
+    de_min_mileage: Optional[int] = typer.Option(None, help="Kilometraje mínimo Alemania"),
+    de_max_mileage: Optional[int] = typer.Option(None, help="Kilometraje máximo Alemania"),
+    de_min_power: Optional[int] = typer.Option(None, help="Potencia mínima Alemania (HP)"),
+    de_max_power: Optional[int] = typer.Option(None, help="Potencia máxima Alemania (HP)"),
+    de_fuel_types: Optional[str] = typer.Option(None, help="Combustibles Alemania"),
+    de_transmissions: Optional[str] = typer.Option(None, help="Transmisiones Alemania"),
+    de_dealer_only: bool = typer.Option(False, help="Solo concesionarios Alemania"),
+    de_private_only: bool = typer.Option(False, help="Solo particulares Alemania"),
+    de_limit: Optional[int] = typer.Option(None, help="Límite de anuncios Alemania"),
     
     # ========== ESPAÑA (coches.net) - Parámetros específicos ==========
-    es_make: Optional[str] = typer.Option(None, help="🇪🇸 Marca para España"),
-    es_model: Optional[str] = typer.Option(None, help="🇪🇸 Modelo para España"),
-    es_min_price: Optional[float] = typer.Option(None, help="🇪🇸 Precio mínimo (EUR)"),
-    es_max_price: Optional[float] = typer.Option(None, help="🇪🇸 Precio máximo (EUR)"),
-    es_min_year: Optional[int] = typer.Option(None, help="🇪🇸 Año mínimo"),
-    es_max_year: Optional[int] = typer.Option(None, help="🇪🇸 Año máximo"),
-    es_min_mileage: Optional[int] = typer.Option(None, help="🇪🇸 Kilometraje mínimo"),
-    es_max_mileage: Optional[int] = typer.Option(None, help="🇪🇸 Kilometraje máximo"),
-    es_min_power: Optional[int] = typer.Option(None, help="🇪🇸 Potencia mínima (HP)"),
-    es_max_power: Optional[int] = typer.Option(None, help="🇪🇸 Potencia máxima (HP)"),
-    es_fuel_types: Optional[str] = typer.Option(None, help="🇪🇸 Combustibles"),
-    es_transmissions: Optional[str] = typer.Option(None, help="🇪🇸 Transmisiones"),
-    es_dealer_only: bool = typer.Option(False, help="🇪🇸 Solo concesionarios"),
-    es_private_only: bool = typer.Option(False, help="🇪🇸 Solo particulares"),
-    es_limit: Optional[int] = typer.Option(None, help="🇪🇸 Límite de anuncios"),
+    es_make: Optional[str] = typer.Option(None, help="Marca para España"),
+    es_model: Optional[str] = typer.Option(None, help="Modelo para España"),
+    es_min_price: Optional[float] = typer.Option(None, help="Precio mínimo España (EUR)"),
+    es_max_price: Optional[float] = typer.Option(None, help="Precio máximo España (EUR)"),
+    es_min_year: Optional[int] = typer.Option(None, help="Año mínimo España"),
+    es_max_year: Optional[int] = typer.Option(None, help="Año máximo España"),
+    es_min_mileage: Optional[int] = typer.Option(None, help="Kilometraje mínimo España"),
+    es_max_mileage: Optional[int] = typer.Option(None, help="Kilometraje máximo España"),
+    es_min_power: Optional[int] = typer.Option(None, help="Potencia mínima España (HP)"),
+    es_max_power: Optional[int] = typer.Option(None, help="Potencia máxima España (HP)"),
+    es_fuel_types: Optional[str] = typer.Option(None, help="Combustibles España"),
+    es_transmissions: Optional[str] = typer.Option(None, help="Transmisiones España"),
+    es_dealer_only: bool = typer.Option(False, help="Solo concesionarios España"),
+    es_private_only: bool = typer.Option(False, help="Solo particulares España"),
+    es_limit: Optional[int] = typer.Option(None, help="Límite de anuncios España"),
     
     # ========== EXPORTACIÓN ==========
     export_filename: Optional[str] = typer.Option(None, help="Nombre del CSV de salida"),
 ) -> None:
     """
-    🔍 Compara anuncios entre mobile.de (Alemania) y coches.net (España)
+    Compara anuncios entre mobile.de (Alemania) y coches.net (España)
     
     Modos de uso:
     1. Simple: --make "BMW" --model "X5" --de-max-price 30000 --es-max-price 40000
@@ -583,10 +633,10 @@ def comparar(
                 console.print(f"[red]Error en {source}: {result}[/red]")
             else:
                 if source == "mobile":
-                    mobile_listings = result.listings
+                    mobile_listings = _enrich_listings(result.listings)
                     console.print(f"[green]mobile.de: {len(mobile_listings)} anuncios encontrados[/green]")
                 else:
-                    coches_listings = result.listings
+                    coches_listings = _enrich_listings(result.listings)
                     console.print(f"[green]coches.net: {len(coches_listings)} anuncios encontrados[/green]")
         
         if not mobile_listings and not coches_listings:
@@ -620,6 +670,8 @@ def comparar(
                     "empresa_iva": be_empresa_iva,
                     "empresa_margen": be_empresa_margen
                 }
+
+        oportunidades = apply_opportunity_analysis(mobile_listings, coches_listings, break_even_data)
         
         # ========== GUARDAR EN CSV ==========
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -636,10 +688,13 @@ def comparar(
             
             # Encabezados
             writer.writerow([
-                "source", "make", "model", "year", "mileage_km", "fuel_type", 
+                "source", "title", "make", "model", "variant_key", "vehicle_signature", "year", "mileage_km", "fuel_type", 
                 "transmission", "power_hp", "price_eur", "seller_type",
                 "break_even_particular", "break_even_empresa_iva", "break_even_empresa_margen",
-                "co2_g_km", "url"
+                "co2_g_km", "co2_original_g_km", "co2_inferred_g_km", "co2_source_type", "co2_confidence",
+                "market_key", "comparable_match_level", "es_market_avg", "es_market_median", "es_market_min", "es_sample_size",
+                "es_exact_sample_size", "es_near_sample_size", "es_broad_sample_size", "image_url",
+                "best_break_even", "potential_margin_avg", "potential_margin_min", "opportunity_score", "url"
             ])
             
             # Datos de Alemania
@@ -647,8 +702,11 @@ def comparar(
                 be_data = break_even_data.get(listing.listing_id, {})
                 writer.writerow([
                     "mobile_de",
+                    listing.title or "",
                     listing.make or "",
                     listing.model or "",
+                    listing.variant_key or "",
+                    listing.vehicle_signature or "",
                     listing.first_registration.year if listing.first_registration else "",
                     listing.mileage_km or "",
                     listing.fuel_type or "",
@@ -660,6 +718,24 @@ def comparar(
                     be_data.get("empresa_iva", ""),
                     be_data.get("empresa_margen", ""),
                     listing.co2_emissions_g_km or "",
+                    listing.co2_original_g_km or "",
+                    listing.co2_inferred_g_km or "",
+                    listing.co2_source_type or "",
+                    listing.co2_confidence if listing.co2_confidence is not None else "",
+                    listing.market_key or "",
+                    listing.comparable_match_level or "",
+                    listing.es_market_avg or "",
+                    listing.es_market_median or "",
+                    listing.es_market_min or "",
+                    listing.es_sample_size or "",
+                    listing.es_exact_sample_size or "",
+                    listing.es_near_sample_size or "",
+                    listing.es_broad_sample_size or "",
+                    str(listing.images[0]) if listing.images else "",
+                    listing.best_break_even or "",
+                    listing.potential_margin_avg or "",
+                    listing.potential_margin_min or "",
+                    listing.import_ready_score or "",
                     str(listing.url)
                 ])
             
@@ -667,8 +743,11 @@ def comparar(
             for listing in coches_listings:
                 writer.writerow([
                     "coches_net",
+                    listing.title or "",
                     listing.make or "",
                     listing.model or "",
+                    listing.variant_key or "",
+                    listing.vehicle_signature or "",
                     listing.first_registration.year if listing.first_registration else "",
                     listing.mileage_km or "",
                     listing.fuel_type or "",
@@ -680,6 +759,24 @@ def comparar(
                     "",
                     "",
                     listing.co2_emissions_g_km or "",
+                    listing.co2_original_g_km or "",
+                    listing.co2_inferred_g_km or "",
+                    listing.co2_source_type or "",
+                    listing.co2_confidence if listing.co2_confidence is not None else "",
+                    listing.market_key or "",
+                    listing.comparable_match_level or "",
+                    listing.es_market_avg or "",
+                    listing.es_market_median or "",
+                    listing.es_market_min or "",
+                    listing.es_sample_size or "",
+                    listing.es_exact_sample_size or "",
+                    listing.es_near_sample_size or "",
+                    listing.es_broad_sample_size or "",
+                    str(listing.images[0]) if listing.images else "",
+                    listing.best_break_even or "",
+                    listing.potential_margin_avg or "",
+                    listing.potential_margin_min or "",
+                    listing.import_ready_score or "",
                     str(listing.url)
                 ])
         
@@ -729,44 +826,28 @@ def comparar(
             console.print("ANALISIS DE OPORTUNIDADES")
             console.print("="*80)
             
-            # Calcular precio promedio de España
-            prices_es = [l.price_eur for l in coches_listings if l.price_eur]
-            avg_price_es = sum(prices_es) / len(prices_es) if prices_es else 0
-            
-            # Encontrar oportunidades en Alemania
-            oportunidades = []
-            for listing in mobile_listings:
-                be_data = break_even_data.get(listing.listing_id, {})
-                be_particular = be_data.get("particular")
-                if listing.price_eur and be_particular:
-                    margen = avg_price_es - be_particular
-                    if margen > 0:
-                        oportunidades.append({
-                            "listing": listing,
-                            "break_even": be_particular,
-                            "margen": margen,
-                            "rentabilidad": (margen / be_particular) * 100
-                        })
-            
             if oportunidades:
-                # Ordenar por rentabilidad
-                oportunidades.sort(key=lambda x: x["rentabilidad"], reverse=True)
-                
-                opp_table = Table(title=f"Top 5 Oportunidades (vs precio promedio Espana: {avg_price_es:,.0f} EUR)")
+                opp_table = Table(title="Top 5 Oportunidades")
                 opp_table.add_column("Modelo", style="cyan")
-                opp_table.add_column("Precio DE", style="yellow", justify="right")
+                opp_table.add_column("Muestras ES", style="white", justify="right")
+                opp_table.add_column("Precio ES medio", style="yellow", justify="right")
+                opp_table.add_column("Match", style="white", justify="center")
                 opp_table.add_column("Break-even", style="magenta", justify="right")
                 opp_table.add_column("Margen", style="green", justify="right")
                 opp_table.add_column("Rentabilidad", style="red", justify="right")
+                opp_table.add_column("Score", style="blue", justify="right")
                 
                 for opp in oportunidades[:5]:
                     listing = opp["listing"]
                     opp_table.add_row(
                         f"{listing.make} {listing.model}",
-                        f"{listing.price_eur:,.0f} EUR",
+                        str(listing.es_sample_size or 0),
+                        f"{listing.es_market_avg:,.0f} EUR" if listing.es_market_avg else "N/A",
+                        listing.comparable_match_level or "N/A",
                         f"{opp['break_even']:,.0f} EUR",
                         f"{opp['margen']:,.0f} EUR",
-                        f"{opp['rentabilidad']:.1f}%"
+                        f"{opp['rentabilidad']:.1f}%",
+                        f"{listing.import_ready_score:,.0f}" if listing.import_ready_score is not None else "N/A",
                     )
                 
                 console.print(opp_table)
