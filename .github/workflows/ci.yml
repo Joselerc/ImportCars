@@ -1,0 +1,42 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements.lock
+
+      - name: Instalar dependencias bloqueadas
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.lock
+          python -m pip install --no-deps -e .
+
+      - name: Comprobar errores críticos en todo el código
+        run: python -m ruff check src api --select E9,F63,F7,F82
+
+      - name: Comprobar el núcleo reparado
+        run: >-
+          python -m ruff check
+          src/import_cars/analysis/opportunity.py
+          src/import_cars/config.py
+          src/import_cars/filters.py
+          src/import_cars/matching.py
+          src/import_cars/scrapers/mobile_de.py
+          src/import_cars/scrapers/mobile_de_http.py
+          src/import_cars/scrapers/coches_net.py
+          src/import_cars/webapp.py
+          tests
+
+      - name: Ejecutar tests sin red
+        run: python -m pytest -q
