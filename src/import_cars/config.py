@@ -17,6 +17,9 @@ class ScraperSettings(BaseSettings):
     concurrency: int = 8
     request_timeout: float = 15.0
     max_retries: int = 4
+    max_pages: int = 5
+    page_pause_min: float = 0.5
+    page_pause_max: float = 1.5
     proxy_pool: List[HttpUrl] = Field(default_factory=list)
     headless: bool = True
     playwright_channel: str = "chrome"

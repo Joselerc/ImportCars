@@ -1,7 +1,8 @@
 from __future__ import annotations
 import html
+import logging
 import re
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any, Dict, List, Optional
 
 from playwright.async_api import async_playwright
@@ -9,6 +10,7 @@ from playwright_stealth import Stealth
 from selectolax.parser import HTMLParser
 
 from ..config import ScraperSettings
+from ..filters import UnifiedFilters
 from ..models import (
     Consumption,
     Location,
@@ -19,9 +21,10 @@ from ..models import (
     Seller,
 )
 from .base import BaseScraper
+from ..utils import build_mobile_de_search_url
 
-# La única URL que usaremos. Directa, sin ambigüedades.
 SEARCH_URL = "https://www.mobile.de/es/categor%C3%ADa/veh%C3%ADculo/vhc:car,dmg:false"
+logger = logging.getLogger(__name__)
 
 
 class MobileDeScraper(BaseScraper):
@@ -30,14 +33,16 @@ class MobileDeScraper(BaseScraper):
     directamente a la página de resultados y parseando el HTML.
     """
 
-    async def search(self, *, query: Dict[str, Any], limit: Optional[int] = None) -> SearchResult:
+    async def search(self, *, query: Dict[str, Any] | UnifiedFilters, limit: Optional[int] = None) -> SearchResult:
         # Compatibilidad con UnifiedFilters
-        if hasattr(query, 'page'):
+        if isinstance(query, UnifiedFilters):
             page = query.page
             page_size = query.page_size
+            search_url = build_mobile_de_search_url(query, page)
         else:
             page = int(query.get("page", 1))
             page_size = int(query.get("page_size", 24))
+            search_url = SEARCH_URL
 
         async with async_playwright() as p:
             browser = await p.chromium.launch(
@@ -59,7 +64,12 @@ class MobileDeScraper(BaseScraper):
             print("DEBUG: Aplicando playwright-stealth para evadir detección...")
             
             # El único método de scraping ahora es este.
-            html, active_page = await self._fetch_results_page(context, page_number=page, page_size=page_size)
+            html, active_page = await self._fetch_results_page(
+                context,
+                url=search_url,
+                page_number=page,
+                page_size=page_size,
+            )
             
             # Aplicar stealth a la página activa (ya aplicado en _fetch_results_page)
             # if active_page:
@@ -76,7 +86,13 @@ class MobileDeScraper(BaseScraper):
             # Pasar la página activa y los IDs interceptados para obtener HTML actualizado
             intercepted_ids = getattr(self, 'intercepted_vehicle_ids', [])
             print(f"DEBUG: Total de IDs interceptados: {len(intercepted_ids)}")
-            data = await self._extract_listings_from_html(html, context, active_page, intercepted_ids)
+            data = await self._extract_listings_from_html(
+                html,
+                context,
+                active_page,
+                intercepted_ids,
+                limit=limit,
+            )
             
             # Cerrar la página después de extraer los datos
             if active_page:
@@ -87,7 +103,14 @@ class MobileDeScraper(BaseScraper):
             
             return self._parse_response(data, page_number=page, page_size=page_size)
 
-    async def _fetch_results_page(self, context, *, page_number: int, page_size: int) -> tuple[Optional[str], Optional[object]]:
+    async def _fetch_results_page(
+        self,
+        context,
+        *,
+        url: str,
+        page_number: int,
+        page_size: int,
+    ) -> tuple[Optional[str], Optional[object]]:
         """
         Navega a la página de resultados con Playwright y devuelve el contenido HTML y la página.
         """
@@ -116,8 +139,6 @@ class MobileDeScraper(BaseScraper):
         
         # Usar on("request") para observar sin bloquear
         page.on("request", handle_request)
-        
-        url = f"{SEARCH_URL},pgn:{page_number},pgs:{page_size}"
         
         try:
             await page.goto(url, wait_until="domcontentloaded", timeout=30000)
@@ -164,14 +185,19 @@ class MobileDeScraper(BaseScraper):
             return html_content, page
 
         except Exception as e:
-            print(f"Error durante la navegación con Playwright: {e}")
-            await page.screenshot(path="debug_screenshot.png", full_page=True)
-            with open("debug_page.html", "w", encoding="utf-8") as f:
-                f.write(await page.content())
+            logger.exception("Error durante la navegación con Playwright: %s", e)
             await page.close()
             return None, None
 
-    async def _extract_listings_from_html(self, html_content: str, context, active_page=None, intercepted_ids=None) -> Dict[str, Any]:
+    async def _extract_listings_from_html(
+        self,
+        html_content: str,
+        context,
+        active_page=None,
+        intercepted_ids=None,
+        *,
+        limit: Optional[int] = None,
+    ) -> Dict[str, Any]:
         # Usar los IDs interceptados del Network durante el scroll en _fetch_results_page
         ids_from_js = intercepted_ids if intercepted_ids else []
         
@@ -197,7 +223,8 @@ class MobileDeScraper(BaseScraper):
         listing_nodes = tree.css("a.BaseListing_containerLink___4jHz")
         print(f"DEBUG: Encontrados {len(listing_nodes)} anuncios en la página de resultados.")
         
-        for i, node in enumerate(listing_nodes):
+        selected_nodes = listing_nodes[:limit] if limit else listing_nodes
+        for i, node in enumerate(selected_nodes):
             print(f"DEBUG: Procesando anuncio {i+1}/{len(listing_nodes)}...")
             
             # Construir URL a partir del ID extraído con JavaScript
@@ -227,13 +254,10 @@ class MobileDeScraper(BaseScraper):
                         url = f"https://www.mobile.de/listing-{i+1}"
                     print(f"DEBUG: URL ficticia generada: {url}")
                 
-            # Solo procesar los primeros 3 para testing
-            if i >= 2:
-                break
-
             # Generar un ID único basado en el data-testid o posición
             testid = node.attributes.get("data-testid", "")
-            ad_id = testid.replace("-link", "") if testid else f"mobile-de-{i+1}"
+            id_match = re.search(r"[?&]id=(\d+)", url)
+            ad_id = id_match.group(1) if id_match else testid.replace("-link", "") if testid else f"mobile-de-{i+1}"
 
             title = node.css_first("h2.ListingTitle_title__p3CnA").text(strip=True) if node.css_first("h2.ListingTitle_title__p3CnA") else None
             # Limpiar el título de prefijos como "Patrocinado"
@@ -308,7 +332,7 @@ class MobileDeScraper(BaseScraper):
 
             # Visitar página de detalle si tenemos una URL real
             detail_data = {}
-            if url and url.startswith('https://www.mobile.de/es/veh') and i < 3:  # Solo primeros 3 para testing
+            if url and url.startswith('https://www.mobile.de/es/veh') and i < 3:
                 detail_data = await self._scrape_detail_page(context, url)
 
             # --- Lógica de IVA Dinámica ---
@@ -342,7 +366,7 @@ class MobileDeScraper(BaseScraper):
             })
         
         if not items:
-            print("ADVERTENCIA: No se encontraron anuncios en la página. Se ha guardado 'debug_page.html' y 'debug_screenshot.png' para revisión.")
+            logger.warning("No se encontraron anuncios en la página de resultados de mobile.de")
 
         # Comprobar si hay un enlace a la página siguiente para la paginación
         next_page_node = tree.css_first("a.pagination--item[rel='next']")
@@ -536,7 +560,11 @@ class MobileDeScraper(BaseScraper):
         search_data = data.get("result", {})
         listings_data = search_data.get("items", [])
         
-        listings = [self._to_listing(item) for item in listings_data if self._to_listing(item) is not None]
+        listings = []
+        for item in listings_data:
+            listing = self._to_listing(item)
+            if listing is not None:
+                listings.append(listing)
 
         return SearchResult(
             listings=listings,
@@ -560,7 +588,7 @@ class MobileDeScraper(BaseScraper):
             listing_id=node.get("id"),
             source="mobile_de",
             url=node.get("url"),
-            scraped_at=datetime.utcnow(),
+            scraped_at=datetime.now(UTC),
             title=node.get("title"),
             make=node.get("make"),
             model=node.get("model"),

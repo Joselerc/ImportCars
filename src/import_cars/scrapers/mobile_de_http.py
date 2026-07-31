@@ -3,23 +3,31 @@ Scraper HTTP para mobile.de usando curl_cffi
 Mucho más rápido que Playwright (sin navegador)
 """
 import html
+import json
+import random
 import re
-from datetime import datetime, timezone
+import threading
+import time
+from datetime import UTC, datetime
 from typing import Any, Dict, List, Optional
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from curl_cffi import requests as cffi
+from curl_cffi.requests.errors import RequestsError
 from selectolax.parser import HTMLParser
+from tenacity import Retrying, retry_if_exception_type, stop_after_attempt, wait_exponential_jitter
 
 from ..config import ScraperSettings, get_settings
 from ..filters import UnifiedFilters
 from ..models import (
     Consumption,
+    ListingMetadata,
     Location,
+    NormalizedListing,
     Price,
     Registration,
     SearchResult,
-    NormalizedListing,
+    Seller,
 )
 from ..utils import build_mobile_de_search_url
 from ..utils.import_calculator import import_calculator, TipoCompra
@@ -32,12 +40,10 @@ class MobileDeHttpScraper:
         self.settings = settings or get_settings()
         self.source = "mobile_de"
         
-        # Crear sesión con fingerprint TLS de Chrome real
-        self.session = cffi.Session(
-            impersonate="chrome",
-            timeout=self.settings.request_timeout,
-        )
-        
+        self._thread_local = threading.local()
+        self.session = self._new_session()
+        self._thread_local.session = self.session
+
         # Headers realistas
         self.headers = {
             "user-agent": self.settings.user_agent,
@@ -45,16 +51,37 @@ class MobileDeHttpScraper:
             "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
         }
 
+    def _new_session(self):
+        return cffi.Session(
+            impersonate="chrome",
+            timeout=self.settings.request_timeout,
+        )
+
+    def _session_for_current_thread(self):
+        session = getattr(self._thread_local, "session", None)
+        if session is None:
+            session = self._new_session()
+            self._thread_local.session = session
+        return session
+
     def _get(self, url: str):
-        last_error = None
-        for _ in range(max(1, self.settings.max_retries)):
-            try:
-                response = self.session.get(url, headers=self.headers)
+        retryer = Retrying(
+            stop=stop_after_attempt(max(1, self.settings.max_retries)),
+            wait=wait_exponential_jitter(initial=0.5, max=8),
+            retry=retry_if_exception_type(RequestsError),
+            reraise=True,
+        )
+        for attempt in retryer:
+            with attempt:
+                proxy = random.choice(self.settings.proxy_pool) if self.settings.proxy_pool else None
+                response = self._session_for_current_thread().get(
+                    url,
+                    headers=self.headers,
+                    proxy=str(proxy) if proxy else None,
+                )
                 response.raise_for_status()
                 return response
-            except Exception as exc:
-                last_error = exc
-        raise last_error
+        raise RuntimeError(f"No se pudo recuperar {url}")
 
     def _build_search_url(self, filters: UnifiedFilters, page: int = 1) -> str:
         """Construir URL de búsqueda con filtros usando el URL builder"""
@@ -64,8 +91,10 @@ class MobileDeHttpScraper:
         """Buscar anuncios con filtros"""
         filters = query or UnifiedFilters()
         all_listings = []
-        page = 1
+        page = filters.page
+        first_page = page
         total_available = None
+        desired_count = limit or filters.page_size
         
         print(f"Iniciando busqueda HTTP en mobile.de...")
         
@@ -76,51 +105,69 @@ class MobileDeHttpScraper:
             # Obtener HTML de la página de listado
             response = self._get(url)
             
+            search_payload = self._extract_next_search_results(response.text)
+
             # Extraer total de resultados (solo en la primera página)
-            if page == 1:
-                total_available = self._extract_total_results(response.text)
+            if page == first_page:
+                total_available = (
+                    search_payload.get("numResultsTotal")
+                    if search_payload
+                    else self._extract_total_results(response.text)
+                )
                 if total_available:
                     print(f"Total de anuncios disponibles: {total_available}")
-            
-            # Extraer IDs de anuncios
-            ids = self._extract_ids_from_listing(response.text)
-            print(f"   OK - {len(ids)} IDs encontrados")
-            
-            if not ids:
+
+            summary_listings = self._extract_summary_listings(search_payload)
+            if summary_listings:
+                listings = [
+                    listing
+                    for listing in summary_listings
+                    if self._matches_filters(listing, filters)
+                ]
+                print(f"   OK - {len(summary_listings)} anuncios encontrados en Next.js")
+            else:
+                # Fallback para estructuras antiguas basadas en enlaces del DOM.
+                ids = self._extract_ids_from_listing(response.text)
+                print(f"   INFO - fallback DOM: {len(ids)} IDs encontrados")
+                listings = [
+                    listing
+                    for listing in self._fetch_details_parallel(ids, max_workers=self.settings.concurrency)
+                    if self._matches_filters(listing, filters)
+                ]
+
+            if not summary_listings and not listings:
                 print("   ADVERTENCIA: No se encontraron mas anuncios")
                 break
-            
-            # Obtener detalles de cada anuncio
-            listings = [
-                listing
-                for listing in self._fetch_details_parallel(ids, max_workers=self.settings.concurrency)
-                if self._matches_filters(listing, filters)
-            ]
-            all_listings.extend(listings)
+
+            remaining = desired_count - len(all_listings)
+            all_listings.extend(listings[:remaining])
             
             print(f"   OK - {len(listings)} anuncios procesados (Total: {len(all_listings)}" + (f"/{total_available}" if total_available else "") + ")")
             
             # Verificar límite
-            if limit and len(all_listings) >= limit:
-                all_listings = all_listings[:limit]
+            if len(all_listings) >= desired_count:
                 break
             
             # Verificar si hay más páginas
-            has_next = self._has_next_page(response.text)
+            if summary_listings:
+                inspected = (page - first_page + 1) * len(summary_listings)
+                has_next = total_available is not None and inspected < total_available
+            else:
+                has_next = self._has_next_page(response.text)
             if not has_next:
                 print("   INFO: No hay mas paginas")
                 break
-            
+
+            if page - first_page + 1 >= self.settings.max_pages:
+                print(f"   INFO: Limite de {self.settings.max_pages} paginas alcanzado")
+                break
+
             page += 1
+            pause_min = min(self.settings.page_pause_min, self.settings.page_pause_max)
+            pause_max = max(self.settings.page_pause_min, self.settings.page_pause_max)
+            time.sleep(random.uniform(pause_min, pause_max))
         
         print(f"\nScraping completado: {len(all_listings)} anuncios extraidos" + (f" de {total_available} totales" if total_available else ""))
-        
-        # Calcular costes de importación para cada anuncio
-        if all_listings:
-            print("\n" + "="*80)
-            print("ANALISIS DE COSTES DE IMPORTACION (Alemania -> Espana)")
-            print("="*80)
-            self._print_import_analysis(all_listings)
         
         return SearchResult(
             listings=all_listings,
@@ -129,6 +176,158 @@ class MobileDeHttpScraper:
             result_page_size=len(all_listings),
             has_next=False,
         )
+
+    def _extract_next_search_results(self, html_content: str) -> Optional[dict]:
+        """Extrae ``searchResults`` de los chunks RSC embebidos por Next.js."""
+        chunks = []
+        pattern = re.compile(
+            r'self\.__next_f\.push\(\[1,("(?:\\.|[^"\\])*")\]\)',
+            re.DOTALL,
+        )
+        for match in pattern.finditer(html_content):
+            try:
+                chunks.append(json.loads(match.group(1)))
+            except (json.JSONDecodeError, TypeError):
+                continue
+
+        decoded = "".join(chunks)
+        marker = '"searchResults":'
+        start = decoded.find(marker)
+        if start < 0:
+            return None
+
+        try:
+            payload, _ = json.JSONDecoder().raw_decode(decoded, start + len(marker))
+        except json.JSONDecodeError:
+            return None
+        return payload if isinstance(payload, dict) else None
+
+    def _extract_summary_listings(self, payload: Optional[dict]) -> List[NormalizedListing]:
+        """Normaliza los anuncios disponibles en la propia página de resultados."""
+        if not payload:
+            return []
+
+        listings = []
+        for item in payload.get("listings", []):
+            listing = self._summary_to_listing(item)
+            if listing is not None:
+                listings.append(listing)
+        return listings
+
+    def _summary_to_listing(self, item: dict) -> Optional[NormalizedListing]:
+        try:
+            listing_id = item.get("id") or item.get("listingId")
+            if not listing_id:
+                return None
+
+            attributes = item.get("attr") or {}
+            make_data = item.get("make") or {}
+            model_data = item.get("model") or {}
+            price_data = item.get("price") or {}
+            gross = price_data.get("grs") or price_data.get("gross") or {}
+            net = price_data.get("net") or {}
+            price_eur = gross.get("amount") or self._localized_number(item.get("p"))
+            price_net_eur = net.get("amount")
+
+            registration = None
+            registration_match = re.search(r"(\d{1,2})/(\d{4})", attributes.get("fr") or "")
+            if registration_match:
+                month, year = registration_match.groups()
+                registration = Registration(year=int(year), month=int(month))
+
+            power_kw = None
+            power_hp = None
+            power_match = re.search(
+                r"(\d+)\s*kW(?:\s*\((\d+)\s*(?:cv|PS|hp)\))?",
+                attributes.get("pw") or "",
+                re.IGNORECASE,
+            )
+            if power_match:
+                power_kw = int(power_match.group(1))
+                power_hp = int(power_match.group(2)) if power_match.group(2) else round(power_kw * 1.35962)
+
+            contact = item.get("contact") or {}
+            rating = contact.get("rating") or {}
+            phones = contact.get("phones") or []
+            seller = Seller(
+                type="dealer" if contact.get("enumType") == "DEALER" else "private" if contact else "unknown",
+                name=contact.get("name"),
+                rating=rating.get("score"),
+                rating_count=rating.get("totalCount") or rating.get("count"),
+                phone=phones[0].get("number") if phones else None,
+            )
+
+            lat_long = contact.get("latLong") or {}
+            location = Location(
+                country_code=attributes.get("cn") or contact.get("country"),
+                city=attributes.get("loc"),
+                postal_code=attributes.get("z"),
+                latitude=lat_long.get("lat"),
+                longitude=lat_long.get("lon"),
+            )
+
+            image_urls = []
+            for image in item.get("images") or []:
+                uri = image.get("uri") if isinstance(image, dict) else None
+                if uri:
+                    image_urls.append(uri if uri.startswith("http") else f"https://{uri}")
+
+            title = " ".join(
+                part.strip()
+                for part in (item.get("shortTitle"), item.get("subTitle"))
+                if part and part.strip()
+            )
+            created = item.get("created")
+            publish_date = datetime.fromtimestamp(created, tz=UTC) if created else None
+
+            return NormalizedListing(
+                listing_id=str(listing_id),
+                source=self.source,
+                url=f"https://www.mobile.de/es/veh%C3%ADculos/detalles.html?id={listing_id}",
+                scraped_at=datetime.now(UTC),
+                title=title or None,
+                make=make_data.get("localized") or item.get("makeName"),
+                model=model_data.get("localized") or item.get("modelName"),
+                price_eur=float(price_eur) if price_eur is not None else None,
+                price_net_eur=float(price_net_eur) if price_net_eur is not None else None,
+                price_original=(
+                    Price(amount=float(price_eur), currency_code=gross.get("currency") or "EUR")
+                    if price_eur is not None
+                    else None
+                ),
+                vat_deductible=bool(price_net_eur) if price_eur is not None else None,
+                mileage_km=self._localized_integer(attributes.get("ml")),
+                first_registration=registration,
+                fuel_type=attributes.get("ft"),
+                transmission=attributes.get("tr"),
+                power_hp=power_hp,
+                power_kw=power_kw,
+                engine_displacement_cc=self._localized_integer(attributes.get("cc")),
+                body_type=attributes.get("c"),
+                color_exterior=attributes.get("ecol"),
+                emission_class=attributes.get("emc"),
+                images=image_urls,
+                location=location,
+                seller=seller,
+                metadata=ListingMetadata(
+                    vehicle_id=str(listing_id),
+                    publish_date=publish_date,
+                ),
+            )
+        except (AttributeError, TypeError, ValueError):
+            return None
+
+    @staticmethod
+    def _localized_integer(value: Optional[str]) -> Optional[int]:
+        if not value:
+            return None
+        match = re.search(r"\d[\d.\s]*", value.replace("\u00a0", " "))
+        return int(re.sub(r"\D", "", match.group(0))) if match else None
+
+    @staticmethod
+    def _localized_number(value: Optional[str]) -> Optional[float]:
+        integer = MobileDeHttpScraper._localized_integer(value)
+        return float(integer) if integer is not None else None
 
     def _extract_total_results(self, html_content: str) -> Optional[int]:
         """Extraer el número total de resultados de la búsqueda"""
