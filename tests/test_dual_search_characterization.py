@@ -1,6 +1,7 @@
+from typer.testing import CliRunner
+
 from import_cars import cli
 from import_cars.models import SearchResult
-from typer.testing import CliRunner
 
 
 def test_compare_sends_the_same_filters_to_both_markets(monkeypatch) -> None:

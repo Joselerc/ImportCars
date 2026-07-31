@@ -63,7 +63,13 @@ def test_exact_comparables_drive_market_values_margin_and_score() -> None:
     opportunities = apply_opportunity_analysis(
         [german],
         spanish,
-        {"de-1": {"particular": 31_000, "empresa_iva": 30_000, "empresa_margen": 30_500}},
+        {
+            "de-1": {
+                "particular": 31_000,
+                "empresa_iva": 30_000,
+                "empresa_margen": 30_500,
+            }
+        },
     )
 
     assert len(opportunities) == 1
@@ -75,7 +81,7 @@ def test_exact_comparables_drive_market_values_margin_and_score() -> None:
     assert german.best_break_even == 30_000
     assert german.potential_margin_avg == 11_000
     assert german.potential_margin_min == 10_000
-    assert german.import_ready_score == 12_360
+    assert german.import_ready_score == 72.67
     assert opportunities[0]["rentabilidad"] == pytest.approx(36.6666667)
 
 
@@ -137,6 +143,32 @@ def test_non_homologable_listings_are_not_used_as_comparables() -> None:
     assert german.comparable_match_level is None
 
 
+def test_different_known_engine_variants_never_match() -> None:
+    german = listing(
+        "de-30d",
+        source="mobile_de",
+        title="BMW X5 xDrive30d",
+        price=25_000,
+        power_hp=265,
+    )
+    spanish = listing(
+        "es-40d",
+        source="coches_net",
+        title="BMW X5 xDrive40d",
+        price=45_000,
+        power_hp=286,
+    )
+
+    opportunities = apply_opportunity_analysis(
+        [german],
+        [spanish],
+        {"de-30d": {"empresa_iva": 31_000}},
+    )
+
+    assert opportunities == []
+    assert german.es_sample_size == 0
+
+
 def test_opportunities_are_sorted_by_import_ready_score() -> None:
     first = listing(
         "de-low",
@@ -166,4 +198,7 @@ def test_opportunities_are_sorted_by_import_ready_score() -> None:
         },
     )
 
-    assert [item["listing"].listing_id for item in opportunities] == ["de-high", "de-low"]
+    assert [item["listing"].listing_id for item in opportunities] == [
+        "de-high",
+        "de-low",
+    ]

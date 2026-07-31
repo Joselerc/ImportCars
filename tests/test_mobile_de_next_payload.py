@@ -1,12 +1,19 @@
 from pathlib import Path
 from types import SimpleNamespace
 
+from import_cars.data import (
+    get_cochesnet_model_id_by_name,
+    get_cochesnet_models_for_make,
+)
 from import_cars.filters import UnifiedFilters
-from import_cars.data import get_cochesnet_model_id_by_name, get_cochesnet_models_for_make
 from import_cars.scrapers.mobile_de_http import MobileDeHttpScraper
 
-
-FIXTURE = Path(__file__).parent / "fixtures" / "mobile_de" / "search_results_next_payload.html"
+FIXTURE = (
+    Path(__file__).parent
+    / "fixtures"
+    / "mobile_de"
+    / "search_results_next_payload.html"
+)
 
 
 def test_extracts_and_normalizes_next_search_results_fixture() -> None:
@@ -40,7 +47,9 @@ def test_search_uses_summary_payload_without_detail_n_plus_one(monkeypatch) -> N
     monkeypatch.setattr(scraper, "_get", lambda _url: SimpleNamespace(text=html))
 
     def details_must_not_be_called(*_args, **_kwargs):
-        raise AssertionError("No debe consultar fichas cuando el payload contiene los anuncios")
+        raise AssertionError(
+            "No debe consultar fichas cuando el payload contiene los anuncios"
+        )
 
     monkeypatch.setattr(scraper, "_fetch_details_parallel", details_must_not_be_called)
 

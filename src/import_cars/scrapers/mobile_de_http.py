@@ -2,23 +2,30 @@
 Scraper HTTP para mobile.de usando curl_cffi
 Mucho más rápido que Playwright (sin navegador)
 """
+
 import html
 import json
 import random
 import re
 import threading
 import time
-from datetime import UTC, datetime
-from typing import Any, Dict, List, Optional
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import UTC, datetime
+from typing import Any
 
 from curl_cffi import requests as cffi
 from curl_cffi.requests.errors import RequestsError
 from selectolax.parser import HTMLParser
-from tenacity import Retrying, retry_if_exception_type, stop_after_attempt, wait_exponential_jitter
+from tenacity import (
+    Retrying,
+    retry_if_exception_type,
+    stop_after_attempt,
+    wait_exponential_jitter,
+)
 
 from ..config import ScraperSettings, get_settings
 from ..filters import UnifiedFilters
+from ..matching import listing_matches_filters
 from ..models import (
     Consumption,
     ListingMetadata,
@@ -30,16 +37,16 @@ from ..models import (
     Seller,
 )
 from ..utils import build_mobile_de_search_url
-from ..utils.import_calculator import import_calculator, TipoCompra
+from ..utils.import_calculator import TipoCompra, import_calculator
 
 
 class MobileDeHttpScraper:
     """Scraper HTTP rápido para mobile.de usando curl_cffi"""
 
-    def __init__(self, settings: Optional[ScraperSettings] = None):
+    def __init__(self, settings: ScraperSettings | None = None):
         self.settings = settings or get_settings()
         self.source = "mobile_de"
-        
+
         self._thread_local = threading.local()
         self.session = self._new_session()
         self._thread_local.session = self.session
@@ -73,7 +80,11 @@ class MobileDeHttpScraper:
         )
         for attempt in retryer:
             with attempt:
-                proxy = random.choice(self.settings.proxy_pool) if self.settings.proxy_pool else None
+                proxy = (
+                    random.choice(self.settings.proxy_pool)
+                    if self.settings.proxy_pool
+                    else None
+                )
                 response = self._session_for_current_thread().get(
                     url,
                     headers=self.headers,
@@ -87,7 +98,9 @@ class MobileDeHttpScraper:
         """Construir URL de búsqueda con filtros usando el URL builder"""
         return build_mobile_de_search_url(filters, page)
 
-    def search(self, query: Optional[UnifiedFilters] = None, limit: Optional[int] = None) -> SearchResult:
+    def search(
+        self, query: UnifiedFilters | None = None, limit: int | None = None
+    ) -> SearchResult:
         """Buscar anuncios con filtros"""
         filters = query or UnifiedFilters()
         all_listings = []
@@ -95,16 +108,16 @@ class MobileDeHttpScraper:
         first_page = page
         total_available = None
         desired_count = limit or filters.page_size
-        
-        print(f"Iniciando busqueda HTTP en mobile.de...")
-        
+
+        print("Iniciando busqueda HTTP en mobile.de...")
+
         while True:
             url = self._build_search_url(filters, page)
             print(f"Pagina {page}: {url}")
-            
+
             # Obtener HTML de la página de listado
             response = self._get(url)
-            
+
             search_payload = self._extract_next_search_results(response.text)
 
             # Extraer total de resultados (solo en la primera página)
@@ -124,14 +137,18 @@ class MobileDeHttpScraper:
                     for listing in summary_listings
                     if self._matches_filters(listing, filters)
                 ]
-                print(f"   OK - {len(summary_listings)} anuncios encontrados en Next.js")
+                print(
+                    f"   OK - {len(summary_listings)} anuncios encontrados en Next.js"
+                )
             else:
                 # Fallback para estructuras antiguas basadas en enlaces del DOM.
                 ids = self._extract_ids_from_listing(response.text)
                 print(f"   INFO - fallback DOM: {len(ids)} IDs encontrados")
                 listings = [
                     listing
-                    for listing in self._fetch_details_parallel(ids, max_workers=self.settings.concurrency)
+                    for listing in self._fetch_details_parallel(
+                        ids, max_workers=self.settings.concurrency
+                    )
                     if self._matches_filters(listing, filters)
                 ]
 
@@ -141,13 +158,17 @@ class MobileDeHttpScraper:
 
             remaining = desired_count - len(all_listings)
             all_listings.extend(listings[:remaining])
-            
-            print(f"   OK - {len(listings)} anuncios procesados (Total: {len(all_listings)}" + (f"/{total_available}" if total_available else "") + ")")
-            
+
+            print(
+                f"   OK - {len(listings)} anuncios procesados (Total: {len(all_listings)}"
+                + (f"/{total_available}" if total_available else "")
+                + ")"
+            )
+
             # Verificar límite
             if len(all_listings) >= desired_count:
                 break
-            
+
             # Verificar si hay más páginas
             if summary_listings:
                 inspected = (page - first_page + 1) * len(summary_listings)
@@ -166,9 +187,12 @@ class MobileDeHttpScraper:
             pause_min = min(self.settings.page_pause_min, self.settings.page_pause_max)
             pause_max = max(self.settings.page_pause_min, self.settings.page_pause_max)
             time.sleep(random.uniform(pause_min, pause_max))
-        
-        print(f"\nScraping completado: {len(all_listings)} anuncios extraidos" + (f" de {total_available} totales" if total_available else ""))
-        
+
+        print(
+            f"\nScraping completado: {len(all_listings)} anuncios extraidos"
+            + (f" de {total_available} totales" if total_available else "")
+        )
+
         return SearchResult(
             listings=all_listings,
             total_listings=total_available or len(all_listings),
@@ -177,7 +201,7 @@ class MobileDeHttpScraper:
             has_next=False,
         )
 
-    def _extract_next_search_results(self, html_content: str) -> Optional[dict]:
+    def _extract_next_search_results(self, html_content: str) -> dict | None:
         """Extrae ``searchResults`` de los chunks RSC embebidos por Next.js."""
         chunks = []
         pattern = re.compile(
@@ -202,7 +226,9 @@ class MobileDeHttpScraper:
             return None
         return payload if isinstance(payload, dict) else None
 
-    def _extract_summary_listings(self, payload: Optional[dict]) -> List[NormalizedListing]:
+    def _extract_summary_listings(
+        self, payload: dict | None
+    ) -> list[NormalizedListing]:
         """Normaliza los anuncios disponibles en la propia página de resultados."""
         if not payload:
             return []
@@ -214,7 +240,7 @@ class MobileDeHttpScraper:
                 listings.append(listing)
         return listings
 
-    def _summary_to_listing(self, item: dict) -> Optional[NormalizedListing]:
+    def _summary_to_listing(self, item: dict) -> NormalizedListing | None:
         try:
             listing_id = item.get("id") or item.get("listingId")
             if not listing_id:
@@ -230,7 +256,9 @@ class MobileDeHttpScraper:
             price_net_eur = net.get("amount")
 
             registration = None
-            registration_match = re.search(r"(\d{1,2})/(\d{4})", attributes.get("fr") or "")
+            registration_match = re.search(
+                r"(\d{1,2})/(\d{4})", attributes.get("fr") or ""
+            )
             if registration_match:
                 month, year = registration_match.groups()
                 registration = Registration(year=int(year), month=int(month))
@@ -244,13 +272,21 @@ class MobileDeHttpScraper:
             )
             if power_match:
                 power_kw = int(power_match.group(1))
-                power_hp = int(power_match.group(2)) if power_match.group(2) else round(power_kw * 1.35962)
+                power_hp = (
+                    int(power_match.group(2))
+                    if power_match.group(2)
+                    else round(power_kw * 1.35962)
+                )
 
             contact = item.get("contact") or {}
             rating = contact.get("rating") or {}
             phones = contact.get("phones") or []
             seller = Seller(
-                type="dealer" if contact.get("enumType") == "DEALER" else "private" if contact else "unknown",
+                type="dealer"
+                if contact.get("enumType") == "DEALER"
+                else "private"
+                if contact
+                else "unknown",
                 name=contact.get("name"),
                 rating=rating.get("score"),
                 rating_count=rating.get("totalCount") or rating.get("count"),
@@ -270,7 +306,9 @@ class MobileDeHttpScraper:
             for image in item.get("images") or []:
                 uri = image.get("uri") if isinstance(image, dict) else None
                 if uri:
-                    image_urls.append(uri if uri.startswith("http") else f"https://{uri}")
+                    image_urls.append(
+                        uri if uri.startswith("http") else f"https://{uri}"
+                    )
 
             title = " ".join(
                 part.strip()
@@ -289,9 +327,14 @@ class MobileDeHttpScraper:
                 make=make_data.get("localized") or item.get("makeName"),
                 model=model_data.get("localized") or item.get("modelName"),
                 price_eur=float(price_eur) if price_eur is not None else None,
-                price_net_eur=float(price_net_eur) if price_net_eur is not None else None,
+                price_net_eur=float(price_net_eur)
+                if price_net_eur is not None
+                else None,
                 price_original=(
-                    Price(amount=float(price_eur), currency_code=gross.get("currency") or "EUR")
+                    Price(
+                        amount=float(price_eur),
+                        currency_code=gross.get("currency") or "EUR",
+                    )
                     if price_eur is not None
                     else None
                 ),
@@ -318,35 +361,29 @@ class MobileDeHttpScraper:
             return None
 
     @staticmethod
-    def _localized_integer(value: Optional[str]) -> Optional[int]:
+    def _localized_integer(value: str | None) -> int | None:
         if not value:
             return None
         match = re.search(r"\d[\d.\s]*", value.replace("\u00a0", " "))
         return int(re.sub(r"\D", "", match.group(0))) if match else None
 
     @staticmethod
-    def _localized_number(value: Optional[str]) -> Optional[float]:
+    def _localized_number(value: str | None) -> float | None:
         integer = MobileDeHttpScraper._localized_integer(value)
         return float(integer) if integer is not None else None
 
-    def _extract_total_results(self, html_content: str) -> Optional[int]:
+    def _extract_total_results(self, html_content: str) -> int | None:
         """Extraer el número total de resultados de la búsqueda"""
-        try:
-            # Método 1: Buscar en el JSON embebido de Next.js
-            match = re.search(r'"numResultsTotal":(\d+)', html_content)
-            if match:
-                return int(match.group(1))
-            
-            # Método 2: Buscar en el texto visible (fallback)
-            match = re.search(r'(\d+)\s*resultados?', html_content, re.IGNORECASE)
-            if match:
-                return int(match.group(1))
-            
-            return None
-        except Exception:
-            return None
+        # Método 1: Buscar en el JSON embebido de Next.js
+        match = re.search(r'"numResultsTotal":(\d+)', html_content)
+        if match:
+            return int(match.group(1))
 
-    def _extract_ids_from_listing(self, html_content: str) -> List[str]:
+        # Método 2: Buscar en el texto visible (fallback)
+        match = re.search(r"(\d+)\s*resultados?", html_content, re.IGNORECASE)
+        return int(match.group(1)) if match else None
+
+    def _extract_ids_from_listing(self, html_content: str) -> list[str]:
         """Extraer IDs de anuncios del HTML de listado"""
         tree = HTMLParser(html_content)
         ids = []
@@ -361,42 +398,11 @@ class MobileDeHttpScraper:
 
         return ids
 
-    def _matches_filters(self, listing: NormalizedListing, filters: UnifiedFilters) -> bool:
+    def _matches_filters(
+        self, listing: NormalizedListing, filters: UnifiedFilters
+    ) -> bool:
         """Filtra resultados HTTP para evitar anuncios ajenos a la búsqueda."""
-        if filters.make and (listing.make or "").upper() != filters.make.upper():
-            return False
-
-        if filters.model:
-            haystack = " ".join(filter(None, [listing.model, listing.title])).upper()
-            if filters.model.upper() not in haystack:
-                return False
-
-        if filters.price_range and listing.price_eur is not None:
-            if filters.price_range.min_price and listing.price_eur < filters.price_range.min_price:
-                return False
-            if filters.price_range.max_price and listing.price_eur > filters.price_range.max_price:
-                return False
-
-        if filters.year_range and listing.first_registration:
-            year = listing.first_registration.year
-            if filters.year_range.min_year and year < filters.year_range.min_year:
-                return False
-            if filters.year_range.max_year and year > filters.year_range.max_year:
-                return False
-
-        if filters.mileage_range and listing.mileage_km is not None:
-            if filters.mileage_range.min_mileage and listing.mileage_km < filters.mileage_range.min_mileage:
-                return False
-            if filters.mileage_range.max_mileage and listing.mileage_km > filters.mileage_range.max_mileage:
-                return False
-
-        if filters.power_range and listing.power_hp is not None:
-            if filters.power_range.min_power_hp and listing.power_hp < filters.power_range.min_power_hp:
-                return False
-            if filters.power_range.max_power_hp and listing.power_hp > filters.power_range.max_power_hp:
-                return False
-
-        return True
+        return listing_matches_filters(listing, filters)
 
     def _has_next_page(self, html_content: str) -> bool:
         """Verificar si hay página siguiente"""
@@ -404,89 +410,99 @@ class MobileDeHttpScraper:
         next_link = tree.css_first('a[rel="next"]')
         return next_link is not None
 
-    def _fetch_details_parallel(self, ids: List[str], max_workers: int = 10) -> List[NormalizedListing]:
+    def _fetch_details_parallel(
+        self, ids: list[str], max_workers: int = 10
+    ) -> list[NormalizedListing]:
         """Obtener detalles de múltiples anuncios en paralelo"""
         listings = []
-        
+
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            future_to_id = {executor.submit(self._fetch_detail, id_): id_ for id_ in ids}
-            
+            future_to_id = {
+                executor.submit(self._fetch_detail, id_): id_ for id_ in ids
+            }
+
             for future in as_completed(future_to_id):
                 try:
                     listing = future.result()
                     if listing:
                         listings.append(listing)
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001 - cada future debe aislar su fallo
                     id_ = future_to_id[future]
                     print(f"      ERROR en ID {id_}: {e}")
-        
+
         return listings
 
-    def _fetch_detail(self, vehicle_id: str) -> Optional[NormalizedListing]:
+    def _fetch_detail(self, vehicle_id: str) -> NormalizedListing | None:
         """Obtener detalles de un anuncio específico"""
         url = f"https://www.mobile.de/es/veh%C3%ADculos/detalles.html?id={vehicle_id}"
-        
+
         try:
             response = self._get(url)
-            
+
             return self._parse_detail_page(response.text, vehicle_id, url)
-        
-        except Exception as e:
+
+        except (AttributeError, RequestsError, TypeError, ValueError) as e:
             print(f"      ERROR obteniendo detalle {vehicle_id}: {e}")
             return None
 
-    def _parse_detail_page(self, html_content: str, vehicle_id: str, url: str) -> Optional[NormalizedListing]:
+    def _parse_detail_page(
+        self, html_content: str, vehicle_id: str, url: str
+    ) -> NormalizedListing | None:
         """Parsear página de detalle completa"""
         tree = HTMLParser(html.unescape(html_content))
         images = self._extract_images(tree, html_content)
-        
+
         # Título - h2.typography_headline__yJCAO
         title = None
-        title_node = tree.css_first('h2.typography_headline__yJCAO')
+        title_node = tree.css_first("h2.typography_headline__yJCAO")
         if title_node:
             title = title_node.text(strip=True)
-        
+
         # Subtítulo/Modelo - div.MainCtaBox_subTitle__wYybO
         subtitle = None
-        subtitle_node = tree.css_first('div.MainCtaBox_subTitle__wYybO')
+        subtitle_node = tree.css_first("div.MainCtaBox_subTitle__wYybO")
         if subtitle_node:
             subtitle = subtitle_node.text(strip=True)
-        
+
         # Precio - div.MainPriceArea_mainPrice__xCkfs
         price_eur = None
-        price_node = tree.css_first('div.MainPriceArea_mainPrice__xCkfs')
+        price_node = tree.css_first("div.MainPriceArea_mainPrice__xCkfs")
         if not price_node:
             price_node = tree.css_first('span[data-testid="prime-price"]')
         if not price_node:
-            price_node = tree.css_first('span.PriceLabel_mainPrice__3SZut')
+            price_node = tree.css_first("span.PriceLabel_mainPrice__3SZut")
         if price_node:
             price_text = price_node.text(strip=True)
             # Eliminar espacios no separables y extraer números
-            price_match = re.search(r"([0-9\.]+)", price_text.replace("\u00A0", "").replace(" ", ""))
+            price_match = re.search(
+                r"([0-9\.]+)", price_text.replace("\u00a0", "").replace(" ", "")
+            )
             if price_match:
                 # Formato alemán: punto como separador de miles, sin decimales
                 price_eur = float(price_match.group(1).replace(".", ""))
-        
+
         # Extraer información del vendedor
         seller_info = self._extract_seller_info(tree)
-        
+
         # Extraer datos de KeyFeatures (mileage, power, fuel, transmission, first_registration, previous_owners)
         tech_data = self._extract_key_features(tree)
-        
+
         # Marca del título
         make = None
         if title:
             make = title.split()[0] if title.split() else None
-        
+
         # Modelo: combinar título + subtítulo
         model = None
         if title and subtitle:
             # Título sin la marca
-            title_without_make = " ".join(title.split()[1:]) if len(title.split()) > 1 else ""
+            title_without_make = (
+                " ".join(title.split()[1:]) if len(title.split()) > 1 else ""
+            )
             model = f"{title_without_make} {subtitle}".strip()
         elif title:
             model = " ".join(title.split()[1:]) if len(title.split()) > 1 else title
-        
+
         # Registro
         registration = None
         if tech_data.get("first_registration"):
@@ -494,35 +510,38 @@ class MobileDeHttpScraper:
             if reg_match:
                 month, year = reg_match.groups()
                 registration = Registration(year=int(year), month=int(month))
-        
+
         # Precio neto (estimado)
         price_net_eur = None
         if price_eur:
             vat_rate = 1.19  # IVA alemán por defecto
             price_net_eur = round(price_eur / vat_rate, 2)
-        
+
         # Preparar consumo (convertir float a objeto Consumption si existe)
         consumption = None
         if tech_data.get("consumption_l_100km"):
             consumption = Consumption(combined=tech_data["consumption_l_100km"])
-        
+
         # Preparar metadata con pegatina de emisiones
         from ..models import ListingMetadata
+
         metadata = ListingMetadata()
         if tech_data.get("emissions_sticker"):
             metadata.environment_badge = tech_data["emissions_sticker"]
-        
+
         return NormalizedListing(
             listing_id=vehicle_id,
             source=self.source,
             url=url,
-            scraped_at=datetime.now(timezone.utc),
+            scraped_at=datetime.now(UTC),
             title=f"{title} {subtitle}".strip() if subtitle else title,
             make=make,
             model=model,
             price_eur=price_eur,
             price_net_eur=price_net_eur,
-            price_original=Price(amount=price_eur, currency_code="EUR") if price_eur else None,
+            price_original=Price(amount=price_eur, currency_code="EUR")
+            if price_eur
+            else None,
             mileage_km=tech_data.get("mileage_km"),
             first_registration=registration,
             fuel_type=tech_data.get("fuel_type"),
@@ -541,18 +560,21 @@ class MobileDeHttpScraper:
             metadata=metadata,
         )
 
-    def _extract_images(self, tree: HTMLParser, html_content: str) -> List[str]:
+    def _extract_images(self, tree: HTMLParser, html_content: str) -> list[str]:
         """Extraer imágenes relevantes del anuncio."""
-        candidates: List[str] = []
+        candidates: list[str] = []
         seen = set()
 
-        def add(url: Optional[str]) -> None:
+        def add(url: str | None) -> None:
             if not url or url in seen:
                 return
             if not url.startswith("http"):
                 return
             lowered = url.lower()
-            if any(token in lowered for token in ("logo", "icon", "sprite", "dealer-rating")):
+            if any(
+                token in lowered
+                for token in ("logo", "icon", "sprite", "dealer-rating")
+            ):
                 return
             seen.add(url)
             candidates.append(url)
@@ -564,92 +586,116 @@ class MobileDeHttpScraper:
             add(node.attributes.get("src"))
             add(node.attributes.get("data-src"))
 
-        for match in re.findall(r'https://[^"\']+\.(?:jpg|jpeg|png|webp)[^"\']*', html_content, re.IGNORECASE):
+        for match in re.findall(
+            r'https://[^"\']+\.(?:jpg|jpeg|png|webp)[^"\']*',
+            html_content,
+            re.IGNORECASE,
+        ):
             add(match)
 
         return candidates[:8]
 
-    def _extract_seller_info(self, tree: HTMLParser) -> Optional[dict]:
+    def _extract_seller_info(self, tree: HTMLParser) -> dict | None:
         """Extraer información del vendedor"""
         from ..models import Seller
-        
+
         # Buscar el contenedor del vendedor
-        seller_container = tree.css_first('div.MainSellerInfo_titleAndRatingBlock__rDi0i')
+        seller_container = tree.css_first(
+            "div.MainSellerInfo_titleAndRatingBlock__rDi0i"
+        )
         if not seller_container:
             return None
-        
+
         # Extraer el texto del label
-        label_node = seller_container.css_first('div.typography_label__EkjGc')
+        label_node = seller_container.css_first("div.typography_label__EkjGc")
         if not label_node:
             return None
-        
+
         label_text = label_node.text(strip=True)
-        
+
         # Determinar tipo de vendedor
         # Buscar patrones en español y alemán
-        is_private = any(keyword in label_text.lower() for keyword in [
-            'vendedor particular', 'particular', 'privat', 'private seller', 'privatverkäufer'
-        ])
-        
+        is_private = any(
+            keyword in label_text.lower()
+            for keyword in [
+                "vendedor particular",
+                "particular",
+                "privat",
+                "private seller",
+                "privatverkäufer",
+            ]
+        )
+
         seller_type = "private" if is_private else "dealer"
         seller_name = None
         rating = None
         rating_count = None
-        
+
         if not is_private:
             # Si es concesionario, buscar el nombre en el enlace
-            link_node = label_node.css_first('a.link_Link__B0oSi')
+            link_node = label_node.css_first("a.link_Link__B0oSi")
             if link_node:
                 seller_name = link_node.text(strip=True)
-            
+
             # Buscar rating
-            rating_node = seller_container.css_first('div.ratingStars_RatingStars__fKi_d')
+            rating_node = seller_container.css_first(
+                "div.ratingStars_RatingStars__fKi_d"
+            )
             if rating_node:
                 # Extraer rating del label sr-only
-                sr_label = rating_node.css_first('span.ratingStars_SrOnlyRatingStarsLabel__03fSs')
+                sr_label = rating_node.css_first(
+                    "span.ratingStars_SrOnlyRatingStarsLabel__03fSs"
+                )
                 if sr_label:
                     rating_text = sr_label.text(strip=True)
                     # Formato: "4.6 estrellas" o "4.6 stars"
-                    rating_match = re.search(r'(\d+\.?\d*)', rating_text)
+                    rating_match = re.search(r"(\d+\.?\d*)", rating_text)
                     if rating_match:
                         rating = float(rating_match.group(1))
-        
+
         return Seller(
-            type=seller_type,
-            name=seller_name,
-            rating=rating,
-            rating_count=rating_count
+            type=seller_type, name=seller_name, rating=rating, rating_count=rating_count
         )
 
-    def _extract_key_features(self, tree: HTMLParser) -> Dict[str, Any]:
+    def _extract_key_features(self, tree: HTMLParser) -> dict[str, Any]:
         """Extraer datos de KeyFeatures usando los selectores específicos"""
         data = {}
-        
+
         # Kilometraje - div[data-testid="vip-key-features-list-item-mileage"]
-        mileage_node = tree.css_first('div[data-testid="vip-key-features-list-item-mileage"] div.KeyFeatures_value__8LVNc')
+        mileage_node = tree.css_first(
+            'div[data-testid="vip-key-features-list-item-mileage"] div.KeyFeatures_value__8LVNc'
+        )
         if mileage_node:
             km_text = mileage_node.text(strip=True)
             km_match = re.search(r"(\d{1,3}(?:\.\d{3})*)", km_text)
             if km_match:
                 data["mileage_km"] = int(km_match.group(1).replace(".", ""))
-        
+
         # Potencia - div[data-testid="vip-key-features-list-item-power"]
-        power_node = tree.css_first('div[data-testid="vip-key-features-list-item-power"] div.KeyFeatures_value__8LVNc')
+        power_node = tree.css_first(
+            'div[data-testid="vip-key-features-list-item-power"] div.KeyFeatures_value__8LVNc'
+        )
         if power_node:
             power_text = power_node.text(strip=True)
             # Formato: "162 kW (220 cv)"
-            kw_match = re.search(r"(\d+)\s*kW\s*\((\d+)\s*cv\)", power_text, re.I)
+            kw_match = re.search(
+                r"(\d+)\s*kW\s*\((\d+)\s*cv\)", power_text, re.IGNORECASE
+            )
             if kw_match:
                 data["power_kw"] = int(kw_match.group(1))
                 data["power_hp"] = int(kw_match.group(2))
-        
+
         # Combustible - div[data-testid="vip-key-features-list-item-fuel"]
-        fuel_node = tree.css_first('div[data-testid="vip-key-features-list-item-fuel"] div.KeyFeatures_value__8LVNc')
+        fuel_node = tree.css_first(
+            'div[data-testid="vip-key-features-list-item-fuel"] div.KeyFeatures_value__8LVNc'
+        )
         if fuel_node:
             data["fuel_type"] = fuel_node.text(strip=True)
-        
+
         # Transmisión - div[data-testid="vip-key-features-list-item-transmission"]
-        transmission_node = tree.css_first('div[data-testid="vip-key-features-list-item-transmission"] div.KeyFeatures_value__8LVNc')
+        transmission_node = tree.css_first(
+            'div[data-testid="vip-key-features-list-item-transmission"] div.KeyFeatures_value__8LVNc'
+        )
         if transmission_node:
             trans_text = transmission_node.text(strip=True)
             if "manual" in trans_text.lower():
@@ -658,20 +704,24 @@ class MobileDeHttpScraper:
                 data["transmission"] = "Automático"
             else:
                 data["transmission"] = trans_text
-        
+
         # Primera matriculación - div[data-testid="vip-key-features-list-item-firstRegistration"]
-        first_reg_node = tree.css_first('div[data-testid="vip-key-features-list-item-firstRegistration"] div.KeyFeatures_value__8LVNc')
+        first_reg_node = tree.css_first(
+            'div[data-testid="vip-key-features-list-item-firstRegistration"] div.KeyFeatures_value__8LVNc'
+        )
         if first_reg_node:
             data["first_registration"] = first_reg_node.text(strip=True)
-        
+
         # Propietarios anteriores - div[data-testid="vip-key-features-list-item-numberOfPreviousOwners"]
-        owners_node = tree.css_first('div[data-testid="vip-key-features-list-item-numberOfPreviousOwners"] div.KeyFeatures_value__8LVNc')
+        owners_node = tree.css_first(
+            'div[data-testid="vip-key-features-list-item-numberOfPreviousOwners"] div.KeyFeatures_value__8LVNc'
+        )
         if owners_node:
             owners_text = owners_node.text(strip=True)
             owners_match = re.search(r"(\d+)", owners_text)
             if owners_match:
                 data["previous_owners"] = int(owners_match.group(1))
-        
+
         # CO2 - dt[data-testid="envkv.co2Emissions-item"] + dd siguiente
         co2_dt = tree.css_first('dt[data-testid="envkv.co2Emissions-item"]')
         if co2_dt:
@@ -684,17 +734,21 @@ class MobileDeHttpScraper:
                     # El siguiente elemento debería ser el dd
                     if dt_index + 1 < len(children):
                         dd_node = children[dt_index + 1]
-                        if dd_node.tag == 'dd':
+                        if dd_node.tag == "dd":
                             co2_text = dd_node.text(strip=True)
                             # Formato: "139 g/km"
-                            co2_match = re.search(r"(\d+)\s*g/km", co2_text, re.I)
+                            co2_match = re.search(
+                                r"(\d+)\s*g/km", co2_text, re.IGNORECASE
+                            )
                             if co2_match:
                                 data["co2_emissions_g_km"] = int(co2_match.group(1))
                 except (ValueError, AttributeError):
                     pass
-        
+
         # Consumo - dt[data-testid="envkv.consumptionDetails.fuel-item"] + dd siguiente
-        consumption_dt = tree.css_first('dt[data-testid="envkv.consumptionDetails.fuel-item"]')
+        consumption_dt = tree.css_first(
+            'dt[data-testid="envkv.consumptionDetails.fuel-item"]'
+        )
         if consumption_dt:
             parent = consumption_dt.parent
             if parent:
@@ -703,15 +757,19 @@ class MobileDeHttpScraper:
                     dt_index = children.index(consumption_dt)
                     if dt_index + 1 < len(children):
                         dd_node = children[dt_index + 1]
-                        if dd_node.tag == 'dd':
+                        if dd_node.tag == "dd":
                             cons_text = dd_node.text(strip=True)
                             # Formato: "6,0 l/100km"
-                            cons_match = re.search(r"(\d+[,.]?\d*)\s*l/100\s*km", cons_text, re.I)
+                            cons_match = re.search(
+                                r"(\d+[,.]?\d*)\s*l/100\s*km", cons_text, re.IGNORECASE
+                            )
                             if cons_match:
-                                data["consumption_l_100km"] = float(cons_match.group(1).replace(",", "."))
+                                data["consumption_l_100km"] = float(
+                                    cons_match.group(1).replace(",", ".")
+                                )
                 except (ValueError, AttributeError):
                     pass
-        
+
         # Cilindrada - dt[data-testid="cubicCapacity-item"] + dd siguiente
         cubic_dt = tree.css_first('dt[data-testid="cubicCapacity-item"]')
         if cubic_dt:
@@ -722,15 +780,19 @@ class MobileDeHttpScraper:
                     dt_index = children.index(cubic_dt)
                     if dt_index + 1 < len(children):
                         dd_node = children[dt_index + 1]
-                        if dd_node.tag == 'dd':
+                        if dd_node.tag == "dd":
                             cubic_text = dd_node.text(strip=True)
                             # Formato: "1.984 ccm" o "1.984 cm³"
-                            cubic_match = re.search(r"(\d{1,3}(?:\.\d{3})*)", cubic_text)
+                            cubic_match = re.search(
+                                r"(\d{1,3}(?:\.\d{3})*)", cubic_text
+                            )
                             if cubic_match:
-                                data["cubic_capacity_ccm"] = int(cubic_match.group(1).replace(".", ""))
+                                data["cubic_capacity_ccm"] = int(
+                                    cubic_match.group(1).replace(".", "")
+                                )
                 except (ValueError, AttributeError):
                     pass
-        
+
         # Pegatina de emisiones - dt[data-testid="emissionsSticker-item"] + dd siguiente
         sticker_dt = tree.css_first('dt[data-testid="emissionsSticker-item"]')
         if sticker_dt:
@@ -741,13 +803,13 @@ class MobileDeHttpScraper:
                     dt_index = children.index(sticker_dt)
                     if dt_index + 1 < len(children):
                         dd_node = children[dt_index + 1]
-                        if dd_node.tag == 'dd':
+                        if dd_node.tag == "dd":
                             sticker_text = dd_node.text(strip=True)
                             # Formato: "4 (Verde)"
                             data["emissions_sticker"] = sticker_text
                 except (ValueError, AttributeError):
                     pass
-        
+
         # Descripción del vehículo - div[data-testid="vip-vehicle-description-text"]
         desc_node = tree.css_first('div[data-testid="vip-vehicle-description-text"]')
         if desc_node:
@@ -760,154 +822,180 @@ class MobileDeHttpScraper:
             # Decodificar entidades HTML
             desc_text = html.unescape(desc_text)
             data["description"] = desc_text.strip()
-        
+
         # Si no se encontró CO2 con el selector específico, buscar en texto general
         full_text = tree.text(strip=True)
         if "co2_emissions_g_km" not in data:
-            co2_match = re.search(r"(\d+)\s*g/km", full_text, re.I)
+            co2_match = re.search(r"(\d+)\s*g/km", full_text, re.IGNORECASE)
             if co2_match:
                 data["co2_emissions_g_km"] = int(co2_match.group(1))
-        
+
         # Si no se encontró consumo, buscar en texto general
         if "consumption_l_100km" not in data:
-            cons_match = re.search(r"(\d+[,.]?\d*)\s*l/100\s*km", full_text, re.I)
+            cons_match = re.search(
+                r"(\d+[,.]?\d*)\s*l/100\s*km", full_text, re.IGNORECASE
+            )
             if cons_match:
-                data["consumption_l_100km"] = float(cons_match.group(1).replace(",", "."))
-        
+                data["consumption_l_100km"] = float(
+                    cons_match.group(1).replace(",", ".")
+                )
+
         # Puertas
-        doors_match = re.search(r"(\d)\s*Puertas", full_text, re.I)
+        doors_match = re.search(r"(\d)\s*Puertas", full_text, re.IGNORECASE)
         if doors_match:
             data["doors"] = int(doors_match.group(1))
-        
+
         # Color exterior
-        color_match = re.search(r"Color exterior[:\s]+([A-Za-zñáéíóú\s]+?)(?:\n|Tapizado|Interior|$)", full_text, re.I)
+        color_match = re.search(
+            r"Color exterior[:\s]+([A-Za-zñáéíóú\s]+?)(?:\n|Tapizado|Interior|$)",
+            full_text,
+            re.IGNORECASE,
+        )
         if color_match:
             data["color_exterior"] = color_match.group(1).strip()
-        
+
         return data
-    
-    def _print_import_analysis(self, listings: List[NormalizedListing]) -> None:
+
+    def _print_import_analysis(self, listings: list[NormalizedListing]) -> None:
         """Imprime análisis de costes de importación para cada anuncio"""
-        
+
         for idx, listing in enumerate(listings, 1):
-            print(f"\n{'-'*80}")
+            print(f"\n{'-' * 80}")
             print(f"ANUNCIO #{idx}")
-            print(f"{'-'*80}")
-            
+            print(f"{'-' * 80}")
+
             # Información básica
             print(f"Vehiculo: {listing.title}")
             print(f"URL: {listing.url}")
             print(f"Precio Alemania: {listing.price_eur:,.2f} EUR")
-            
+
             # Tipo de vendedor
-            seller_type_label = "Concesionario" if listing.seller and listing.seller.type == "dealer" else "Particular"
-            seller_name = f" ({listing.seller.name})" if listing.seller and listing.seller.name else ""
+            seller_type_label = (
+                "Concesionario"
+                if listing.seller and listing.seller.type == "dealer"
+                else "Particular"
+            )
+            seller_name = (
+                f" ({listing.seller.name})"
+                if listing.seller and listing.seller.name
+                else ""
+            )
             print(f"{seller_type_label}{seller_name}")
-            
+
             # Datos técnicos relevantes
             if listing.mileage_km:
                 print(f"Kilometraje: {listing.mileage_km:,} km")
             if listing.first_registration:
-                print(f"Primera matriculacion: {listing.first_registration.month}/{listing.first_registration.year}")
+                print(
+                    f"Primera matriculacion: {listing.first_registration.month}/{listing.first_registration.year}"
+                )
             if listing.power_hp:
                 print(f"Potencia: {listing.power_hp} CV")
-            
+
             # CO2 y cálculo de costes
             if listing.co2_emissions_g_km:
                 print(f"CO2: {listing.co2_emissions_g_km} g/km")
-                self._calculate_and_print_import_costs(listing, listing.co2_emissions_g_km)
+                self._calculate_and_print_import_costs(
+                    listing, listing.co2_emissions_g_km
+                )
             else:
-                print(f"ADVERTENCIA: CO2 no disponible")
-                print(f"\nCalculando rangos segun posibles emisiones de CO2:")
+                print("ADVERTENCIA: CO2 no disponible")
+                print("\nCalculando rangos segun posibles emisiones de CO2:")
                 self._print_co2_scenarios(listing)
-    
-    def _calculate_and_print_import_costs(self, listing: NormalizedListing, co2: int) -> None:
+
+    def _calculate_and_print_import_costs(
+        self, listing: NormalizedListing, co2: int
+    ) -> None:
         """Calcula y muestra los costes de importación para un CO2 específico"""
-        
+
         if not listing.price_eur:
             print("❌ No se puede calcular (precio no disponible)")
             return
-        
+
         # Determinar tipo de compra según el vendedor
         is_dealer = listing.seller and listing.seller.type == "dealer"
-        
-        print(f"\nCOSTES DE IMPORTACION:")
-        
+
+        print("\nCOSTES DE IMPORTACION:")
+
         if is_dealer:
             # Mostrar ambos casos de empresa
-            print(f"\n  Caso 1: Compra a EMPRESA (IVA Aleman)")
+            print("\n  Caso 1: Compra a EMPRESA (IVA Aleman)")
             costes_iva = import_calculator.calcular_costes_importacion(
-                listing.price_eur,
-                TipoCompra.EMPRESA_IVA,
-                co2
+                listing.price_eur, TipoCompra.EMPRESA_IVA, co2
             )
             print(f"     Precio Alemania:    {listing.price_eur:>10,.2f}€")
             print(f"     + ITP:              {costes_iva['itp']:>10,.2f}€")
-            print(f"     + IEDMT ({costes_iva['tasa_iedmt']}%):    {costes_iva['iedmt']:>10,.2f}€")
+            print(
+                f"     + IEDMT ({costes_iva['tasa_iedmt']}%):    {costes_iva['iedmt']:>10,.2f}€"
+            )
             print(f"     + Transporte:       {costes_iva['transporte']:>10,.2f}€")
             print(f"     + ITV:              {costes_iva['itv_tasa']:>10,.2f}€")
             print(f"     + Traducciones:     {costes_iva['traducciones']:>10,.2f}€")
             print(f"     + IVTM:             {costes_iva['ivtm']:>10,.2f}€")
             print(f"     + Placas:           {costes_iva['placas']:>10,.2f}€")
-            print(f"     {'-'*36}")
+            print(f"     {'-' * 36}")
             print(f"     = BREAK-EVEN:    {costes_iva['break_even']:>10,.2f} EUR")
-            
-            print(f"\n  Caso 2: Compra a EMPRESA (Regimen Margen 25a)")
+
+            print("\n  Caso 2: Compra a EMPRESA (Regimen Margen 25a)")
             costes_margen = import_calculator.calcular_costes_importacion(
-                listing.price_eur,
-                TipoCompra.EMPRESA_MARGEN,
-                co2
+                listing.price_eur, TipoCompra.EMPRESA_MARGEN, co2
             )
             print(f"     Precio Alemania:    {listing.price_eur:>10,.2f}€")
             print(f"     + ITP:              {costes_margen['itp']:>10,.2f}€")
-            print(f"     + IEDMT ({costes_margen['tasa_iedmt']}%):    {costes_margen['iedmt']:>10,.2f}€")
-            print(f"     + Costes base:      {costes_margen['costes_base_total']:>10,.2f}€")
-            print(f"     {'-'*36}")
+            print(
+                f"     + IEDMT ({costes_margen['tasa_iedmt']}%):    {costes_margen['iedmt']:>10,.2f}€"
+            )
+            print(
+                f"     + Costes base:      {costes_margen['costes_base_total']:>10,.2f}€"
+            )
+            print(f"     {'-' * 36}")
             print(f"     = BREAK-EVEN:    {costes_margen['break_even']:>10,.2f} EUR")
-            
+
             # Destacar el mejor
-            print(f"\n  Rango de precio en Espana: {costes_iva['break_even']:,.2f} EUR - {costes_margen['break_even']:,.2f} EUR")
+            print(
+                f"\n  Rango de precio en Espana: {costes_iva['break_even']:,.2f} EUR - {costes_margen['break_even']:,.2f} EUR"
+            )
         else:
             # Particular
-            print(f"\n  Compra a PARTICULAR")
+            print("\n  Compra a PARTICULAR")
             costes = import_calculator.calcular_costes_importacion(
-                listing.price_eur,
-                TipoCompra.PARTICULAR,
-                co2
+                listing.price_eur, TipoCompra.PARTICULAR, co2
             )
             print(f"     Precio Alemania:    {listing.price_eur:>10,.2f}€")
             print(f"     + ITP (4%):         {costes['itp']:>10,.2f}€")
-            print(f"     + IEDMT ({costes['tasa_iedmt']}%):    {costes['iedmt']:>10,.2f}€")
+            print(
+                f"     + IEDMT ({costes['tasa_iedmt']}%):    {costes['iedmt']:>10,.2f}€"
+            )
             print(f"     + Transporte:       {costes['transporte']:>10,.2f}€")
             print(f"     + ITV:              {costes['itv_tasa']:>10,.2f}€")
             print(f"     + Traducciones:     {costes['traducciones']:>10,.2f}€")
             print(f"     + IVTM:             {costes['ivtm']:>10,.2f}€")
             print(f"     + Placas:           {costes['placas']:>10,.2f}€")
-            print(f"     {'-'*36}")
+            print(f"     {'-' * 36}")
             print(f"     = BREAK-EVEN:    {costes['break_even']:>10,.2f} EUR")
-    
+
     def _print_co2_scenarios(self, listing: NormalizedListing) -> None:
         """Muestra escenarios de coste según diferentes rangos de CO2"""
-        
+
         if not listing.price_eur:
             print("❌ No se puede calcular (precio no disponible)")
             return
-        
+
         is_dealer = listing.seller and listing.seller.type == "dealer"
-        
+
         # Escenarios de CO2
         scenarios = [
             ("MEJOR CASO (CO2 <=120 g/km, IEDMT 0%)", 120),
             ("CASO MEDIO (CO2 121-159 g/km, IEDMT 4.75%)", 140),
             ("PEOR CASO (CO2 >=200 g/km, IEDMT 14.75%)", 200),
         ]
-        
+
         print()
         for label, co2 in scenarios:
-            print(f"  {'-'*76}")
+            print(f"  {'-' * 76}")
             print(f"  {label}")
-            print(f"  {'-'*76}")
-            
+            print(f"  {'-' * 76}")
+
             if is_dealer:
                 # Mostrar rango para empresa
                 costes_iva = import_calculator.calcular_costes_importacion(
@@ -916,13 +1004,18 @@ class MobileDeHttpScraper:
                 costes_margen = import_calculator.calcular_costes_importacion(
                     listing.price_eur, TipoCompra.EMPRESA_MARGEN, co2
                 )
-                print(f"  Precio:       {listing.price_eur:>10,.2f}€ + IEDMT ({costes_iva['tasa_iedmt']}%): {costes_iva['iedmt']:,.2f}€ + Costes: {costes_iva['costes_base_total']:,.2f}€")
-                print(f"  Break-even: {costes_iva['break_even']:,.2f} EUR - {costes_margen['break_even']:,.2f} EUR")
+                print(
+                    f"  Precio:       {listing.price_eur:>10,.2f}€ + IEDMT ({costes_iva['tasa_iedmt']}%): {costes_iva['iedmt']:,.2f}€ + Costes: {costes_iva['costes_base_total']:,.2f}€"
+                )
+                print(
+                    f"  Break-even: {costes_iva['break_even']:,.2f} EUR - {costes_margen['break_even']:,.2f} EUR"
+                )
             else:
                 # Particular
                 costes = import_calculator.calcular_costes_importacion(
                     listing.price_eur, TipoCompra.PARTICULAR, co2
                 )
-                print(f"  Precio:       {listing.price_eur:>10,.2f}€ + ITP: {costes['itp']:,.2f}€ + IEDMT ({costes['tasa_iedmt']}%): {costes['iedmt']:,.2f}€ + Costes: {costes['costes_base_total']:,.2f}€")
+                print(
+                    f"  Precio:       {listing.price_eur:>10,.2f}€ + ITP: {costes['itp']:,.2f}€ + IEDMT ({costes['tasa_iedmt']}%): {costes['iedmt']:,.2f}€ + Costes: {costes['costes_base_total']:,.2f}€"
+                )
                 print(f"  Break-even: {costes['break_even']:,.2f} EUR")
-
