@@ -19,6 +19,7 @@
     const element = byId(id);
     element.textContent = message;
     element.className = `calc-status ${kind}`.trim();
+    element.setAttribute("role", kind === "error" ? "alert" : "status");
   };
   const detailMessage = (data, fallback) => {
     if (typeof data?.detail === "string") return data.detail;
@@ -29,17 +30,75 @@
   let latestCalculation = null;
   let latestSourceUrl = null;
 
+  const breakdownHelp = {
+    precio: "Es el precio publicado por el vendedor en Alemania, antes de transporte e impuestos españoles.",
+    transporte: "Traslado asegurado del vehículo desde Alemania hasta España.",
+    iedmt: "Depende de las emisiones de CO₂ y del valor fiscal oficial del vehículo, no solo del precio del anuncio.",
+    itp: "Se aplica al comprar a un particular. El tipo depende de la comunidad autónoma donde se matricula.",
+    iva: "Se aplica cuando el vehículo cumple fiscalmente la condición de nuevo y debe liquidar IVA en España.",
+    admin: "Incluye la ITV de importación, la tasa de matriculación de la DGT y las placas.",
+    ivtm: "Es el impuesto municipal de circulación correspondiente al primer año, prorrateado cuando procede.",
+    otros: "Agrupa conceptos adicionales que solo se aplican cuando hacen falta, como CoC, aduana o traducción.",
+    honorarios: "Tarifa fija de gestión: búsqueda, verificación, negociación, coordinación del transporte y trámites.",
+    total: "Suma del coche y todas las partidas mostradas para dejarlo matriculado y a tu nombre en España.",
+  };
+  const fieldNames = {
+    make: "la marca",
+    model: "el modelo",
+    first_registration: "la primera matriculación",
+    purchase_price: "el precio",
+    fuel: "el combustible",
+    displacement_cc: "la cilindrada",
+    mileage_km: "los kilómetros",
+    power_kw: "la potencia",
+    seller_type: "el tipo de vendedor",
+  };
+
+  const setButtonLoading = (button, loading, message = "Calculando…") => {
+    if (!button) return;
+    if (loading) {
+      if (!button.dataset.idleHtml) button.dataset.idleHtml = button.innerHTML;
+      button.disabled = true;
+      button.setAttribute("aria-busy", "true");
+      button.classList.add("is-loading");
+      button.textContent = message;
+      return;
+    }
+    button.disabled = false;
+    button.removeAttribute("aria-busy");
+    button.classList.remove("is-loading");
+    if (button.dataset.idleHtml) button.innerHTML = button.dataset.idleHtml;
+  };
+
   const switchPane = (name) => {
     document.querySelectorAll(".calc-tab").forEach((tab) => {
-      tab.classList.toggle("active", tab.dataset.pane === name);
+      const active = tab.dataset.pane === name;
+      tab.classList.toggle("active", active);
+      tab.setAttribute("aria-selected", String(active));
+      tab.tabIndex = active ? 0 : -1;
     });
     document.querySelectorAll(".pane").forEach((pane) => {
-      pane.classList.toggle("active", pane.dataset.pane === name);
+      const active = pane.dataset.pane === name;
+      pane.classList.toggle("active", active);
+      pane.hidden = !active;
     });
   };
 
   document.querySelectorAll(".calc-tab").forEach((tab) => {
     tab.addEventListener("click", () => switchPane(tab.dataset.pane));
+    tab.addEventListener("keydown", (event) => {
+      const tabs = Array.from(document.querySelectorAll(".calc-tab"));
+      const current = tabs.indexOf(event.currentTarget);
+      let next = null;
+      if (event.key === "ArrowRight") next = (current + 1) % tabs.length;
+      if (event.key === "ArrowLeft") next = (current - 1 + tabs.length) % tabs.length;
+      if (event.key === "Home") next = 0;
+      if (event.key === "End") next = tabs.length - 1;
+      if (next === null) return;
+      event.preventDefault();
+      switchPane(tabs[next].dataset.pane);
+      tabs[next].focus();
+    });
   });
 
   const province = (id) => {
@@ -88,6 +147,14 @@
     byId("m_prov").value = byId("u_prov").value;
   };
 
+  const displayLabel = (row) => {
+    if (row.key === "ivtm") return "Impuesto de circulación (primer año, prorrateado)";
+    if (row.key === "honorarios") return "Honorarios fijos de gestión";
+    return row.label;
+  };
+
+  const displayNote = (note) => String(note || "").replaceAll("CO2", "CO₂").replaceAll(" -> ", " → ");
+
   const addBreakdownRow = (container, row, extraClass = "") => {
     const element = document.createElement("div");
     element.className = `bd-row ${extraClass}`.trim();
@@ -96,15 +163,23 @@
     const labelBlock = document.createElement("div");
     const name = document.createElement("span");
     name.className = "name";
-    name.textContent = row.label;
+    name.textContent = displayLabel(row);
     labelBlock.appendChild(name);
     if (row.note) {
       const note = document.createElement("div");
       note.className = "note";
-      note.textContent = row.note;
+      note.textContent = displayNote(row.note);
       labelBlock.appendChild(note);
     }
     label.appendChild(labelBlock);
+    const help = breakdownHelp[row.key] || "Importe incluido en el precio final. El presupuesto formal confirmará esta partida por escrito.";
+    const info = document.createElement("button");
+    info.type = "button";
+    info.className = "info";
+    info.textContent = "i";
+    info.dataset.tooltip = help;
+    info.setAttribute("aria-label", `Más información sobre ${displayLabel(row)}`);
+    label.appendChild(info);
     const value = document.createElement("div");
     value.className = "bd-val";
     value.textContent = money(row.amount_eur);
@@ -116,28 +191,37 @@
     latestCalculation = data;
     byId("r_car").textContent = data.vehicle_label;
     byId("r_total").textContent = money(data.final_price_eur).replace("€", "").trim();
-    byId("r_save").textContent = data.savings_eur === null
-      ? "—"
-      : new Intl.NumberFormat("es-ES", { maximumFractionDigits: 0 }).format(data.savings_eur);
-    byId("r_es").textContent = data.spanish_market_price_eur === null
-      ? "no disponible ahora"
-      : `${money(data.spanish_market_price_eur)} · ${data.market_sample_size} comparables`;
-    document.querySelector(".savings .lbl").textContent =
-      data.savings_eur !== null && data.savings_eur >= 0 ? "Te ahorras" : "Diferencia frente a España";
+    const savingsCard = byId("savings-card");
+    const savingsLabel = savingsCard.querySelector(".lbl");
+    savingsCard.classList.remove("positive", "negative", "unavailable");
+    if (data.savings_eur === null || data.spanish_market_price_eur === null) {
+      savingsCard.classList.add("unavailable");
+      savingsLabel.textContent = "Ahorro aún no disponible";
+      byId("r_save").textContent = "—";
+      byId("r_es").textContent = "No hay suficientes comparables españoles. El precio final sí está calculado.";
+    } else if (data.savings_eur >= 0) {
+      savingsCard.classList.add("positive");
+      savingsLabel.textContent = "Te ahorras";
+      byId("r_save").textContent = money(data.savings_eur);
+      byId("r_es").textContent = `frente a ${money(data.spanish_market_price_eur)} de media en España · ${data.market_sample_size} comparables`;
+    } else {
+      savingsCard.classList.add("negative");
+      savingsLabel.textContent = "Cuesta más que en España";
+      byId("r_save").textContent = money(Math.abs(data.savings_eur));
+      byId("r_es").textContent = `sobre ${money(data.spanish_market_price_eur)} de media en España · ${data.market_sample_size} comparables`;
+    }
 
-    const breakdown = byId("breakdown");
-    breakdown.querySelectorAll(".bd-row").forEach((row) => row.remove());
-    const disclaimer = breakdown.querySelector(".bd-sub");
-    const rows = document.createElement("div");
-    data.breakdown.forEach((row) => addBreakdownRow(rows, row, row.key === "honorarios" ? "fee" : ""));
+    const rows = byId("breakdown-rows");
+    rows.replaceChildren();
+    (data.breakdown || []).forEach((row) => addBreakdownRow(rows, row, row.key === "honorarios" ? "fee" : ""));
     addBreakdownRow(rows, {
+      key: "total",
       label: "Precio final, todo incluido",
       amount_eur: data.final_price_eur,
       note: "",
     }, "total");
-    breakdown.insertBefore(rows, disclaimer);
     byId("b_disclaimer").textContent =
-      `Cálculo orientativo según ${data.fiscal_version}. ` +
+      `Cálculo según ${data.fiscal_version}. ` +
       (data.boe_model_match
         ? `Versión BOE encontrada: ${data.boe_model_match}.`
         : "La versión exacta no se ha podido confirmar en la tabla del BOE.");
@@ -145,12 +229,12 @@
     const riskBox = byId("risk-box");
     const riskList = byId("risk-list");
     riskList.replaceChildren();
-    data.warnings.forEach((warning) => {
+    (data.warnings || []).forEach((warning) => {
       const item = document.createElement("li");
       item.textContent = warning;
       riskList.appendChild(item);
     });
-    riskBox.hidden = data.warnings.length === 0;
+    riskBox.hidden = !data.warnings || data.warnings.length === 0;
 
     const whatsapp = byId("whatsapp-link");
     const message = encodeURIComponent(
@@ -161,10 +245,12 @@
     const results = byId("results");
     results.classList.add("show");
     results.scrollIntoView({ behavior: "smooth", block: "start" });
+    results.focus({ preventScroll: true });
   };
 
-  const calculate = async () => {
+  const calculate = async (button = byId("manual-submit")) => {
     setStatus("manual-status", "Consultando Hacienda y comparables de coches.net…");
+    setButtonLoading(button, true);
     try {
       const response = await fetch("/api/public/calculate", {
         method: "POST",
@@ -177,12 +263,14 @@
       setStatus("manual-status", "Cálculo completado con el motor fiscal oficial.", "ok");
     } catch (error) {
       setStatus("manual-status", error.message || "No se pudo calcular.", "error");
+    } finally {
+      setButtonLoading(button, false);
     }
   };
 
   byId("manual-submit").addEventListener("click", (event) => {
     event.preventDefault();
-    calculate();
+    calculate(event.currentTarget);
   });
 
   byId("url-submit").addEventListener("click", async (event) => {
@@ -193,6 +281,8 @@
       return;
     }
     setStatus("url-status", "Leyendo el anuncio…");
+    const button = event.currentTarget;
+    setButtonLoading(button, true, "Leyendo anuncio…");
     try {
       const response = await fetch("/api/public/parse-listing", {
         method: "POST",
@@ -205,17 +295,23 @@
       fillManual(listing);
       switchPane("manual");
       if (listing.missing_fields.length) {
+        const missing = listing.missing_fields.map((field) => fieldNames[field] || "algún dato necesario");
         setStatus(
           "manual-status",
-          `Revisa los datos: el anuncio no aporta ${listing.missing_fields.join(", ")}.`,
+          `Revisa los datos: el anuncio no aporta ${missing.join(", ")}.`,
           "error"
         );
       } else {
         setStatus("manual-status", "Anuncio leído. Revisa los datos y calculamos ahora.", "ok");
-        await calculate();
+        await calculate(byId("manual-submit"));
       }
     } catch (error) {
-      setStatus("url-status", `${error.message} Puedes continuar con los datos a mano.`, "error");
+      switchPane("manual");
+      setStatus("url-status", "No hemos podido leer ese anuncio.", "error");
+      setStatus("manual-status", `${error.message} Puedes continuar con los datos a mano.`, "error");
+      byId("m_make").focus();
+    } finally {
+      setButtonLoading(button, false);
     }
   });
 
@@ -226,6 +322,8 @@
       return;
     }
     setStatus("lead-status", "Guardando tu solicitud…");
+    const button = byId("lead-submit");
+    setButtonLoading(button, true, "Enviando…");
     try {
       const response = await fetch("/api/public/leads", {
         method: "POST",
@@ -245,6 +343,8 @@
       event.target.reset();
     } catch (error) {
       setStatus("lead-status", error.message || "No se pudo guardar la solicitud.", "error");
+    } finally {
+      setButtonLoading(button, false);
     }
   });
 })();
