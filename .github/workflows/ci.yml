@@ -30,12 +30,14 @@ jobs:
           python -m ruff check
           src/import_cars/analysis/opportunity.py
           src/import_cars/config.py
+          src/import_cars/fiscal_data
           src/import_cars/filters.py
           src/import_cars/matching.py
           src/import_cars/scrapers/mobile_de.py
           src/import_cars/scrapers/mobile_de_http.py
           src/import_cars/scrapers/coches_net.py
           src/import_cars/webapp.py
+          scripts/load_boe_values.py
           tests
 
       - name: Ejecutar tests sin red

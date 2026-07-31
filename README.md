@@ -222,6 +222,22 @@ El sistema está diseñado para facilitar la integración con una interfaz web:
 - **Checkboxes**: Opciones booleanas
 - **Inputs**: Límites específicos
 
+## Datos fiscales oficiales del BOE
+
+La carga anual guarda en SQLite los datos fuente de los anexos I y IV. No
+calcula impuestos: esa responsabilidad corresponde exclusivamente al paquete
+`fiscal_engine`.
+
+```bash
+python scripts/load_boe_values.py \
+  --database data/import_cars.sqlite3 \
+  --exercise 2026
+```
+
+Para otro ejercicio hay que indicar también con `--url` el XML oficial de la
+orden anual publicado en `boe.es`. La carga valida el ejercicio, registra la
+orden y su huella SHA-256, y reemplaza atómicamente solo esa misma versión.
+
 ## 📈 Estadísticas del Proyecto
 
 ### Funcionalidad Completada
@@ -230,24 +246,25 @@ El sistema está diseñado para facilitar la integración con una interfaz web:
 - ✅ Exportación Excel/CSV (100%)
 - ✅ CLI avanzado (100%)
 - ✅ Comparación de mercados (100%)
-- 🔧 Scraper mobile.de (80% - requiere ajustes)
+- ✅ Scraper mobile.de HTTP con payload Next.js y fallback DOM
+- ✅ Datos BOE 2026 versionados en SQLite local
 
 ### Archivos Clave
 - `src/import_cars/filters.py` - Sistema de filtros
 - `src/import_cars/scrapers/coches_net.py` - Scraper funcional
-- `src/import_cars/scrapers/mobile_de.py` - Scraper en desarrollo
+- `src/import_cars/scrapers/mobile_de_http.py` - Scraper HTTP principal
+- `src/import_cars/scrapers/mobile_de.py` - Vía Playwright de diagnóstico/fallback
+- `src/import_cars/fiscal_data/boe.py` - Ingesta anual de datos oficiales
 - `src/import_cars/exporters.py` - Exportación de datos
 - `src/import_cars/cli.py` - Interfaz de línea de comandos
 - `examples/usage_examples.md` - Ejemplos de uso
 
 ## 🚧 Próximos Pasos
 
-1. **Completar mobile.de**: Ajustar selectores y filtros
-2. **Optimizar Filtros**: Refinar IDs de marcas y modelos
-3. **Añadir Más Campos**: Imágenes, características adicionales
-4. **Base de Datos**: Integración con PostgreSQL/SQLite
-5. **API REST**: Endpoint para integración web
-6. **Dashboard Web**: Interfaz visual para análisis
+1. **Integrar `fiscal_engine`** cuando se entregue el paquete validado
+2. **Completar la calculadora pública** con el prototipo visual definitivo
+3. **Rotar la sesión de coches.net** y limpiar el historial tras recuperar acceso a GitHub
+4. **Aplazar infraestructura persistente** hasta validar la necesidad de la v2
 
 ## 🤝 Contribución
 
@@ -260,6 +277,6 @@ El proyecto está estructurado para facilitar contribuciones:
 
 ---
 
-**Estado**: ✅ Funcional para coches.net | 🔧 En desarrollo para mobile.de
+**Estado**: ✅ Comparación equivalente mobile.de + coches.net | 🚧 Motor fiscal pendiente de integrar
 
 **Objetivo**: Identificar oportunidades de importación de vehículos entre mercados alemán y español.

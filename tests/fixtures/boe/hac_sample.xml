@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<documento fecha_actualizacion="20251223115601">
+  <metadatos>
+    <identificador>BOE-A-2025-26357</identificador>
+    <numero_oficial>HAC/1501/2025</numero_oficial>
+    <fecha_publicacion>20251223</fecha_publicacion>
+    <fecha_vigencia>20260101</fecha_vigencia>
+  </metadatos>
+  <texto>
+    <p class="anexo_num">ANEXO I</p>
+    <p class="anexo_tit">Precios medios de vehículos</p>
+    <p class="centro_cursiva">Valores para el ejercicio 2026</p>
+    <table class="tabla_ancha">
+      <thead><tr><th>Marca: ABARTH Modelo-Tipo Periodo comercial Datos ficha técnica cv 2026 Valor euros</th></tr></thead>
+      <tbody>
+        <tr><td>124 1.4 Spider</td><td>2016</td><td>2021</td><td>1.368</td><td>4</td><td>G</td><td>125</td><td>10,61</td><td>170</td><td>33.400</td></tr>
+        <tr><td>500e</td><td>2023</td><td></td><td></td><td></td><td>Elc</td><td>87</td><td></td><td>118</td><td>29.100</td></tr>
+      </tbody>
+    </table>
+    <p class="centro_negrita">Precios medios de autocaravanas usadas durante el primer año posterior a su primera matriculación</p>
+    <table class="tabla_ancha">
+      <thead><tr><th>Marca: ACME Modelo-Tipo Periodo comercial Datos ficha técnica cv 2026 Valor euros</th></tr></thead>
+      <tbody>
+        <tr><td>Camper One</td><td>2022</td><td></td><td>2.200</td><td>4</td><td>D</td><td>103</td><td>14,10</td><td>140</td><td>41.900</td></tr>
+      </tbody>
+    </table>
+    <p class="centro_negrita">Precios medios de ciclomotores y motocicletas eléctricos, usados durante el primer año posterior a su matriculación</p>
+    <table class="tabla"><thead><tr><th>Potencia kW (cv)</th><th>Precios – Euros</th></tr></thead><tbody><tr><td>Hasta 2 kW (2,71 cv).</td><td>1.400</td></tr></tbody></table>
+    <p class="centro_negrita">Precios medios de ciclomotores y motocicletas de motor de combustión, usados durante el primer año posterior a su matriculación</p>
+    <table class="tabla"><thead><tr><th>Cilindrada</th><th>Precios – Euros</th></tr></thead><tbody><tr><td>Hasta 50 c.c.</td><td>950</td></tr></tbody></table>
+    <p class="centro_negrita">Precios medios de quads usados durante el primer año posterior a su matriculación</p>
+    <table class="tabla"><thead><tr><th>Cilindrada</th><th>Precios – Euros</th></tr></thead><tbody><tr><td>Hasta 50 c.c.</td><td>1.250</td></tr></tbody></table>
+    <p class="centro_negrita">Precios medios de buggys usados durante el primer año posterior a su matriculación</p>
+    <table class="tabla"><thead><tr><th>Cilindrada</th><th>Precios – Euros</th></tr></thead><tbody><tr><td>Hasta 250 c.c.</td><td>1.650</td></tr></tbody></table>
+    <p class="anexo_num">ANEXO II</p>
+    <p>Contenido no relevante para esta carga.</p>
+    <p class="anexo_num">ANEXO III</p>
+    <p>Contenido no relevante para esta carga.</p>
+    <p class="anexo">ANEXO IV</p>
+    <p>Porcentajes para vehículos distintos de los destinados a vivienda.</p>
+    <table class="tabla"><thead><tr><th>Años de uso</th><th>Porcentajes</th></tr></thead><tbody><tr><td>Hasta 1 año.</td><td>100</td></tr><tr><td>Más de 1 año, hasta 2.</td><td>84</td></tr></tbody></table>
+    <p>Porcentajes para autocaravanas, campers y vehículos vivienda.</p>
+    <table class="tabla"><thead><tr><th>Años de uso</th><th>Porcentajes</th></tr></thead><tbody><tr><td>Hasta 1 año</td><td>100</td></tr><tr><td>Más de 1 año, hasta 2</td><td>87</td></tr></tbody></table>
+    <p>El importe resultante se reducirá al 70 por 100 en los supuestos descritos por la Orden.</p>
+  </texto>
+</documento>
