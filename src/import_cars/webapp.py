@@ -111,7 +111,9 @@ INT_FIELDS = {
 
 
 def _web_exports_dir() -> Path:
-    path = Path("exports")
+    # Los sistemas de archivos de las funciones serverless son efímeros. En
+    # Vercel solo /tmp es escribible; en local preservamos la carpeta habitual.
+    path = Path("/tmp/import_cars_exports") if os.getenv("VERCEL") else Path("exports")
     path.mkdir(exist_ok=True)
     return path
 
@@ -273,6 +275,17 @@ def _needs_advanced_mode(request: CompareRequest) -> bool:
     ) or request.mode == "advanced"
 
 
+def _has_search_seed(request: CompareRequest) -> bool:
+    return any(
+        value
+        for value in (
+            request.make,
+            request.de_make,
+            request.es_make,
+        )
+    )
+
+
 def _build_command(request: CompareRequest, export_name: str) -> list[str]:
     command = [
         sys.executable,
@@ -383,6 +396,12 @@ async def dashboard(request: Request):
     )
 
 
+@app.get("/api/health")
+async def health() -> dict[str, str]:
+    """Health check ligero para despliegues y monitorización."""
+    return {"status": "ok"}
+
+
 @app.get("/comparisons", response_class=HTMLResponse)
 async def comparisons(request: Request):
     return templates.TemplateResponse(
@@ -427,6 +446,11 @@ async def export_file(filename: str) -> FileResponse:
 
 @app.post("/api/compare")
 async def compare(request: CompareRequest) -> dict:
+    if not _has_search_seed(request):
+        raise HTTPException(
+            status_code=400,
+            detail="Introduce al menos una marca en Marca, Alemania o Espana antes de lanzar la comparacion.",
+        )
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     export_path = _web_exports_dir() / f"web_compare_{timestamp}.csv"
     command = _build_command(request, export_path.name)

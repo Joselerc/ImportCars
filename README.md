@@ -31,6 +31,16 @@ pip install -e .
 playwright install chromium
 ```
 
+## Despliegue en Vercel
+
+La interfaz FastAPI se puede desplegar como una función Python de Vercel. El
+repositorio incluye `api/index.py` y `vercel.json`; basta con importar el
+repositorio en Vercel y desplegar la rama `main`.
+
+El endpoint de comprobación es `/api/health`. Las ejecuciones de scraping se
+limitan a 60 segundos y los CSV generados en Vercel son temporales: para
+conservar informes entre ejecuciones hay que conectar almacenamiento externo.
+
 ## 📊 Uso Básico
 
 ### Scraping Simple

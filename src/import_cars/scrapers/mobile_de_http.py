@@ -4,14 +4,14 @@ Mucho más rápido que Playwright (sin navegador)
 """
 import html
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from curl_cffi import requests as cffi
 from selectolax.parser import HTMLParser
 
-from ..config import ScraperSettings
+from ..config import ScraperSettings, get_settings
 from ..filters import UnifiedFilters
 from ..models import (
     Consumption,
@@ -29,21 +29,32 @@ class MobileDeHttpScraper:
     """Scraper HTTP rápido para mobile.de usando curl_cffi"""
 
     def __init__(self, settings: Optional[ScraperSettings] = None):
-        self.settings = settings or ScraperSettings()
+        self.settings = settings or get_settings()
         self.source = "mobile_de"
         
         # Crear sesión con fingerprint TLS de Chrome real
         self.session = cffi.Session(
             impersonate="chrome",
-            timeout=30,
+            timeout=self.settings.request_timeout,
         )
         
         # Headers realistas
         self.headers = {
-            "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+            "user-agent": self.settings.user_agent,
             "accept-language": "es-ES,es;q=0.9",
             "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
         }
+
+    def _get(self, url: str):
+        last_error = None
+        for _ in range(max(1, self.settings.max_retries)):
+            try:
+                response = self.session.get(url, headers=self.headers)
+                response.raise_for_status()
+                return response
+            except Exception as exc:
+                last_error = exc
+        raise last_error
 
     def _build_search_url(self, filters: UnifiedFilters, page: int = 1) -> str:
         """Construir URL de búsqueda con filtros usando el URL builder"""
@@ -63,8 +74,7 @@ class MobileDeHttpScraper:
             print(f"Pagina {page}: {url}")
             
             # Obtener HTML de la página de listado
-            response = self.session.get(url, headers=self.headers)
-            response.raise_for_status()
+            response = self._get(url)
             
             # Extraer total de resultados (solo en la primera página)
             if page == 1:
@@ -83,7 +93,7 @@ class MobileDeHttpScraper:
             # Obtener detalles de cada anuncio
             listings = [
                 listing
-                for listing in self._fetch_details_parallel(ids, max_workers=10)
+                for listing in self._fetch_details_parallel(ids, max_workers=self.settings.concurrency)
                 if self._matches_filters(listing, filters)
             ]
             all_listings.extend(listings)
@@ -218,8 +228,7 @@ class MobileDeHttpScraper:
         url = f"https://www.mobile.de/es/veh%C3%ADculos/detalles.html?id={vehicle_id}"
         
         try:
-            response = self.session.get(url, headers=self.headers)
-            response.raise_for_status()
+            response = self._get(url)
             
             return self._parse_detail_page(response.text, vehicle_id, url)
         
@@ -308,7 +317,7 @@ class MobileDeHttpScraper:
             listing_id=vehicle_id,
             source=self.source,
             url=url,
-            scraped_at=datetime.now(),
+            scraped_at=datetime.now(timezone.utc),
             title=f"{title} {subtitle}".strip() if subtitle else title,
             make=make,
             model=model,

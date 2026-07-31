@@ -1,0 +1,18 @@
+.venv/
+.pytest_cache/
+__pycache__/
+playwright-coches-net-profile/
+exports/
+debug_*.html
+debug_*.png
+debug_page.html
+debug_screenshot.png
+test_*.py
+test_*.html
+test_*.png
+test_curl_cffi_output.html
+src/debug_*.html
+src/debug_*.png
+src/import_cars/scrapers/mobile_de_html_full.txt
+UI References/
+mobilede_models_fetch.log

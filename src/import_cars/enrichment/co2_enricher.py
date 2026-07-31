@@ -4,7 +4,7 @@ from typing import Any, Dict, List, Optional
 
 from ..models import NormalizedListing
 from .co2_memory import load_co2_memory, save_co2_memory, upsert_co2_memory
-from .signature import build_model_key, build_variant_key, build_vehicle_signature, normalize_text
+from .signature import build_model_key, build_variant_key, build_vehicle_signature, normalize_fuel_category, normalize_text
 
 
 def _listing_year(listing: NormalizedListing) -> Optional[int]:
@@ -18,7 +18,7 @@ def _memory_payload(listing: NormalizedListing) -> Dict[str, Any]:
         "model_key": build_model_key(listing.model),
         "variant_key": build_variant_key(listing),
         "year": _listing_year(listing),
-        "fuel_type": normalize_text(listing.fuel_type),
+        "fuel_type": normalize_fuel_category(listing.fuel_type),
         "power_hp": listing.power_hp,
         "engine_displacement_cc": listing.engine_displacement_cc,
         "transmission": normalize_text(listing.transmission),
@@ -34,7 +34,7 @@ def _near_match_score(listing: NormalizedListing, entry: Dict[str, Any]) -> Opti
     entry_variant = entry.get("variant_key") or "na"
     if listing_variant != "na" and entry_variant != "na" and listing_variant != entry_variant:
         return None
-    if listing.fuel_type and entry.get("fuel_type") and normalize_text(listing.fuel_type) != normalize_text(entry.get("fuel_type")):
+    if listing.fuel_type and entry.get("fuel_type") and normalize_fuel_category(listing.fuel_type) != normalize_fuel_category(entry.get("fuel_type")):
         return None
     if listing.transmission and entry.get("transmission") and normalize_text(listing.transmission) != normalize_text(entry.get("transmission")):
         return None

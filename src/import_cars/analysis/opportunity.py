@@ -4,7 +4,7 @@ from statistics import median
 from typing import Dict, List, Optional
 
 from ..models import NormalizedListing
-from ..enrichment.signature import build_model_key, build_variant_key, normalize_text
+from ..enrichment.signature import build_model_key, build_variant_key, normalize_fuel_category, normalize_text
 
 
 def _listing_year(listing: NormalizedListing) -> Optional[int]:
@@ -13,8 +13,14 @@ def _listing_year(listing: NormalizedListing) -> Optional[int]:
 
 def build_market_key(listing: NormalizedListing) -> str:
     make = normalize_text(listing.make)
-    fuel = normalize_text(listing.fuel_type)
+    fuel = normalize_fuel_category(listing.fuel_type)
     return f"{make}|{build_model_key(listing.model)}|{fuel or 'na'}"
+
+
+def _preferred_break_even(listing: NormalizedListing, break_even_data: Dict[str, float]) -> Optional[float]:
+    if listing.seller and listing.seller.type == "private":
+        return break_even_data.get("particular")
+    return break_even_data.get("empresa_iva") or break_even_data.get("empresa_margen") or break_even_data.get("particular")
 
 
 def _match_level(target: NormalizedListing, candidate: NormalizedListing) -> Optional[str]:
@@ -27,29 +33,29 @@ def _match_level(target: NormalizedListing, candidate: NormalizedListing) -> Opt
 
     target_year = _listing_year(target)
     candidate_year = _listing_year(candidate)
-    year_delta = abs(target_year - candidate_year) if target_year and candidate_year else 0
-    if year_delta > 4:
+    year_delta = abs(target_year - candidate_year) if target_year and candidate_year else None
+    if year_delta is not None and year_delta > 4:
         return None
 
-    cc_delta = 0
+    cc_delta = None
     if target.engine_displacement_cc and candidate.engine_displacement_cc:
         cc_delta = abs(target.engine_displacement_cc - candidate.engine_displacement_cc)
         if cc_delta > 500:
             return None
 
-    power_delta = 0
+    power_delta = None
     if target.power_hp and candidate.power_hp:
         power_delta = abs(target.power_hp - candidate.power_hp)
         if power_delta > max(60, int(target.power_hp * 0.25)):
             return None
 
-    if same_variant and year_delta <= 1 and cc_delta <= 150 and power_delta <= 15:
+    if same_variant and year_delta is not None and cc_delta is not None and power_delta is not None and year_delta <= 1 and cc_delta <= 150 and power_delta <= 15:
         return "exact"
-    if same_variant and year_delta <= 2 and cc_delta <= 300 and power_delta <= 30:
+    if same_variant and year_delta is not None and cc_delta is not None and power_delta is not None and year_delta <= 2 and cc_delta <= 300 and power_delta <= 30:
         return "near"
-    if year_delta <= 2 and cc_delta <= 200 and power_delta <= 20:
+    if year_delta is not None and cc_delta is not None and power_delta is not None and year_delta <= 2 and cc_delta <= 200 and power_delta <= 20:
         return "near"
-    return "broad"
+    return "broad" if same_variant or year_delta is not None else None
 
 
 def apply_opportunity_analysis(
@@ -66,13 +72,16 @@ def apply_opportunity_analysis(
         listing.variant_key = build_variant_key(listing)
         listing.market_key = build_market_key(listing)
 
+    market_buckets: Dict[str, List[NormalizedListing]] = {}
+    for item in coches_listings:
+        if item.price_eur is not None:
+            market_buckets.setdefault(item.market_key, []).append(item)
+
     for listing in mobile_listings:
         exact = []
         near = []
         broad = []
-        for item in coches_listings:
-            if not item.price_eur:
-                continue
+        for item in market_buckets.get(listing.market_key, []):
             level = _match_level(listing, item)
             if level == "exact":
                 exact.append(item)
@@ -97,21 +106,22 @@ def apply_opportunity_analysis(
         listing.es_market_min = round(min(prices), 2)
 
         be_data = break_even_data.get(listing.listing_id, {})
+        preferred_break_even = _preferred_break_even(listing, be_data)
         candidates = [value for value in be_data.values() if value is not None]
-        if not candidates:
+        if preferred_break_even is None and not candidates:
             continue
 
-        listing.best_break_even = round(min(candidates), 2)
+        listing.best_break_even = round(preferred_break_even if preferred_break_even is not None else min(candidates), 2)
         listing.potential_margin_avg = round(listing.es_market_avg - listing.best_break_even, 2)
         listing.potential_margin_min = round(listing.es_market_min - listing.best_break_even, 2)
 
-        # Score simple: margen medio, penalizado por pocas muestras y peores márgenes.
+        safety_gap = max(0, listing.best_break_even - listing.es_market_min)
         listing.import_ready_score = round(
             listing.potential_margin_avg
-            + min(listing.es_sample_size, 5) * 500
-            + (listing.co2_confidence or 0) * 250
-            + (750 if listing.comparable_match_level == "exact" else 350 if listing.comparable_match_level == "near" else 0)
-            + min(listing.potential_margin_min, 0),
+            + min(listing.es_sample_size, 5) * 300
+            + (listing.co2_confidence or 0) * 200
+            + (600 if listing.comparable_match_level == "exact" else 250 if listing.comparable_match_level == "near" else 0)
+            - safety_gap * 0.35,
             2,
         )
 

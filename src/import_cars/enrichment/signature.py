@@ -15,6 +15,33 @@ def normalize_text(value: Optional[str]) -> str:
     return value or "na"
 
 
+def normalize_fuel_category(value: Optional[str]) -> str:
+    normalized = normalize_text(value)
+    mapping = {
+        "benzin": "gasoline",
+        "gasolina": "gasoline",
+        "petrol": "gasoline",
+        "diesel": "diesel",
+        "diesel_mild_hybrid": "hybrid_diesel",
+        "di_esel": "diesel",
+        "electrico": "electric",
+        "elektrisch": "electric",
+        "electric": "electric",
+        "hybrid": "hybrid",
+        "hibrido": "hybrid",
+        "hybrid_gasoline": "hybrid_gasoline",
+        "hybrid_petrol": "hybrid_gasoline",
+        "hibrido_gasolina": "hybrid_gasoline",
+        "hybrid_diesel": "hybrid_diesel",
+        "hibrido_diesel": "hybrid_diesel",
+        "lpg": "lpg",
+        "glp": "lpg",
+        "cng": "cng",
+        "gnc": "cng",
+    }
+    return mapping.get(normalized, normalized)
+
+
 def _normalize_number(value: Optional[Any]) -> str:
     return "na" if value in (None, "") else str(value)
 
@@ -60,7 +87,7 @@ def build_vehicle_signature(listing: NormalizedListing) -> str:
         build_model_key(listing.model),
         build_variant_key(listing),
         _normalize_number(year),
-        normalize_text(listing.fuel_type),
+        normalize_fuel_category(listing.fuel_type),
         _normalize_number(listing.power_hp),
         _normalize_number(listing.engine_displacement_cc),
         normalize_text(listing.transmission),

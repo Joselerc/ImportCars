@@ -100,22 +100,22 @@ class CochesNetScraper(BaseScraper):
                 "environmentalLabels": [],
                 "equipments": [],
                 "fee": {"from": None, "to": None},
-                "fuelTypeIds": [1, 2],  # Diesel y gasolina por defecto
+                "fuelTypeIds": [],
                 "hasOnlineFinancing": None,
                 "hasPhoto": None,
                 "hasReservation": None,
                 "hasStock": None,
                 "hasWarranty": None,
-                "hp": {"from": 50, "to": 500},  # Potencia por defecto
+                "hp": {"from": None, "to": None},
                 "isCertified": False,
-                "km": {"from": 5000, "to": 160000},  # Kilometraje por defecto
+                "km": {"from": None, "to": None},
                 "luggageCapacity": {"from": None, "to": None},
                 "maxTerms": None,
                 "offerTypeIds": [0, 1, 2, 3, 4, 5],  # Todos los tipos de oferta
                 "onlyPeninsula": False,
                 "price": {"from": None, "to": None},
                 "priceRank": [],
-                "provinceIds": [28],  # Madrid por defecto
+                "provinceIds": [],
                 "rating": {"from": None, "to": None},
                 "searchText": None,
                 "sellerTypeId": 0,  # Todos los vendedores
@@ -258,7 +258,7 @@ class CochesNetScraper(BaseScraper):
                 response.raise_for_status()
                 logger.info("Petición exitosa. Parseando JSON.")
                 json_data = response.json()
-                logger.info(f"Respuesta JSON recibida: {json_data}")
+                logger.info("Respuesta JSON recibida con %s items", len(json_data.get("items", [])))
                 return json_data
             except httpx.HTTPStatusError as e:
                 logger.error(f"Error HTTP al obtener resultados: {e.response.status_code} - {e.response.text}")
@@ -341,9 +341,9 @@ class CochesNetScraper(BaseScraper):
         
         # Filtro por rango de potencia
         if filters.power_range and listing.power_hp is not None:
-            if filters.power_range.min_power and listing.power_hp < filters.power_range.min_power:
+            if filters.power_range.min_power_hp and listing.power_hp < filters.power_range.min_power_hp:
                 return False
-            if filters.power_range.max_power and listing.power_hp > filters.power_range.max_power:
+            if filters.power_range.max_power_hp and listing.power_hp > filters.power_range.max_power_hp:
                 return False
         
         return True

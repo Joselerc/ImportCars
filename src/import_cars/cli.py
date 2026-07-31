@@ -22,6 +22,7 @@ from .enrichment import Co2Enricher
 from .exporters import ExcelExporter, CSVExporter
 from .filters import UnifiedFilters, FuelType, Transmission, SortBy, PriceRange, YearRange, MileageRange, PowerRange
 from .scrapers import CochesNetScraper, MobileDeHttpScraper
+from .utils import import_calculator, TipoCompra
 
 # Configurar logging
 logging.basicConfig(level=logging.INFO)
@@ -399,9 +400,15 @@ def compare(
         for listing in mobile_listings:
             if listing.price_eur:
                 break_even_data[listing.listing_id] = {
-                    "particular": listing.price_eur * 1.04 if listing.seller and listing.seller.type == "private" else listing.price_eur,
-                    "empresa_iva": listing.price_eur,
-                    "empresa_margen": listing.price_eur,
+                    "particular": import_calculator.calcular_costes_importacion(
+                        listing.price_eur, TipoCompra.PARTICULAR, listing.co2_emissions_g_km
+                    )["break_even"],
+                    "empresa_iva": import_calculator.calcular_costes_importacion(
+                        listing.price_eur, TipoCompra.EMPRESA_IVA, listing.co2_emissions_g_km
+                    )["break_even"],
+                    "empresa_margen": import_calculator.calcular_costes_importacion(
+                        listing.price_eur, TipoCompra.EMPRESA_MARGEN, listing.co2_emissions_g_km
+                    )["break_even"],
                 }
 
         opportunities = apply_opportunity_analysis(mobile_listings, coches_listings, break_even_data)
@@ -516,8 +523,6 @@ def comparar(
     2. Avanzado: --de-make "BMW" --de-model "X5" --es-make "BMW" --es-model "X5 xDrive"
     """
     
-    # Importar aquí para evitar problemas de importación circular
-    from .utils import import_calculator, TipoCompra
     import csv
     from datetime import datetime
     

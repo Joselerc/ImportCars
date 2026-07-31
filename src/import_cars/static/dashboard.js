@@ -198,16 +198,23 @@
     `).join("");
   };
 
+  const hasSearchSeed = (data) => Boolean(data.make || data.de_make || data.es_make);
+
   modeButtons.forEach((btn) => btn.addEventListener("click", () => switchMode(btn.dataset.mode)));
   if (drawerClose) drawerClose.addEventListener("click", () => drawer.classList.remove("open"));
 
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
+    const payload = serialize();
+    if (!hasSearchSeed(payload)) {
+      statusEl.textContent = "Introduce al menos una marca antes de ejecutar la comparacion.";
+      return;
+    }
     statusEl.textContent = "Ejecutando scraping, enriquecimiento y scoring...";
     const response = await fetch("/api/compare", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(serialize()),
+      body: JSON.stringify(payload),
     });
     const data = await response.json();
     if (!response.ok) {
@@ -217,7 +224,7 @@
     selectedUrl = null;
     lastExportUrl = data.export_url || "#";
     if (exportLink) exportLink.href = lastExportUrl;
-    statusEl.textContent = `Completado. ${data.summary.de_count} anuncios DE, ${data.summary.es_count} anuncios ES.`;
+    statusEl.textContent = `Completado. ${data.summary.de_count} anuncios DE, ${data.summary.es_count} anuncios ES, ${data.summary.positive_count} oportunidades positivas.`;
     renderSummary(data.summary);
     renderOpportunities(data.opportunities || []);
     renderTable(data.rows || []);
