@@ -62,9 +62,6 @@ def test_caso_particular():
     assert abs(resultado['beneficio_neto'] - 867.8) < 0.5, f"Error: esperado 867.8, obtenido {resultado['beneficio_neto']}"
     print("\n✅ VALIDACIÓN: OK")
     
-    return resultado
-
-
 def test_caso_empresa_iva():
     """Caso 2: Compra a empresa con IVA"""
     print("\n" + "=" * 60)
@@ -106,9 +103,6 @@ def test_caso_empresa_iva():
     assert abs(resultado['beneficio_neto'] - 1025.8) < 0.5, f"Error: esperado 1025.8, obtenido {resultado['beneficio_neto']}"
     print("\n✅ VALIDACIÓN: OK")
     
-    return resultado
-
-
 def test_caso_empresa_margen():
     """Caso 3: Compra a empresa con régimen de margen"""
     print("\n" + "=" * 60)
@@ -150,9 +144,6 @@ def test_caso_empresa_margen():
     assert abs(resultado['beneficio_neto'] - 1025.8) < 0.5, f"Error: esperado 1025.8, obtenido {resultado['beneficio_neto']}"
     print("\n✅ VALIDACIÓN: OK")
     
-    return resultado
-
-
 def comparar_casos():
     """Compara los 3 casos lado a lado"""
     print("\n" + "=" * 60)

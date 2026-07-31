@@ -18,7 +18,23 @@
     const parsed = Number(value);
     return Number.isFinite(parsed) ? parsed : null;
   };
-  const safe = (value) => (value === null || value === undefined || value === "" ? "--" : value);
+  const safe = (value) => (value === null || value === undefined || value === "" ? "--" : String(value));
+  const escapeHtml = (value) => safe(value).replace(/[&<>'"]/g, (character) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    "'": "&#39;",
+    '"': "&quot;",
+  })[character]);
+  const safeUrl = (value) => {
+    if (!value) return "#";
+    try {
+      const url = new URL(String(value), window.location.origin);
+      return ["http:", "https:"].includes(url.protocol) ? url.href : "#";
+    } catch (_error) {
+      return "#";
+    }
+  };
   const intFmt = (value) => {
     const parsed = n(value);
     return parsed === null ? "--" : new Intl.NumberFormat("es-ES", { maximumFractionDigits: 0 }).format(parsed);
@@ -40,7 +56,10 @@
     const el = document.getElementById(id);
     if (el) el.textContent = value;
   };
-  const imageMarkup = (url, alt) => (url ? `<img src="${url}" alt="${alt}" loading="lazy">` : "");
+  const imageMarkup = (url, alt) => {
+    const source = safeUrl(url);
+    return source !== "#" ? `<img src="${escapeHtml(source)}" alt="${escapeHtml(alt)}" loading="lazy">` : "";
+  };
 
   const switchMode = (mode) => {
     modeInput.value = mode;
@@ -95,8 +114,8 @@
     set("spec-mileage", row.mileage_km ? `${intFmt(row.mileage_km)} km` : "--");
     set("spec-power", row.power_hp ? `${intFmt(row.power_hp)} hp` : "--");
     set("spec-fuel", safe(row.fuel_type));
-    document.getElementById("detail-link").href = row.url || "#";
-    document.getElementById("detail-export-link").href = lastExportUrl;
+    document.getElementById("detail-link").href = safeUrl(row.url);
+    document.getElementById("detail-export-link").href = safeUrl(lastExportUrl);
     document.getElementById("drawer-image").innerHTML = imageMarkup(row.image_url, row.display_title || "Car image");
     set("detail-margin", eurFmt(row.potential_margin_avg));
     set("detail-market-ref", `${eurFmt(row.es_market_avg)} ES market average`);
@@ -124,25 +143,25 @@
       return;
     }
     oppsEl.innerHTML = rows.map((row, index) => `
-      <article class="opp ${(selectedUrl === row.url || (!selectedUrl && index === 0)) ? "active" : ""}" data-url="${row.url}">
-        <div class="thumb" data-initials="${initials(row)}">
+      <article class="opp ${(selectedUrl === row.url || (!selectedUrl && index === 0)) ? "active" : ""}" data-index="${index}">
+        <div class="thumb" data-initials="${escapeHtml(initials(row))}">
           ${imageMarkup(row.image_url, row.display_title || "Car image")}
-          <div class="badge ${badgeKind(row.comparable_match_level)} top-badge">${safe(row.comparable_match_level)}</div>
+          <div class="badge ${badgeKind(row.comparable_match_level)} top-badge">${escapeHtml(row.comparable_match_level)}</div>
         </div>
         <div>
           <div class="opp-header">
             <div>
-              <h3 class="opp-title">${safe(row.display_title || `${row.make || ""} ${row.model || ""}`)}</h3>
+              <h3 class="opp-title">${escapeHtml(row.display_title || `${row.make || ""} ${row.model || ""}`)}</h3>
               <div class="opp-meta">
-                <span>${safe(row.variant_key)}</span>
-                <span>${safe(row.year)}</span>
+                <span>${escapeHtml(row.variant_key)}</span>
+                <span>${escapeHtml(row.year)}</span>
                 <span>${row.mileage_km ? `${intFmt(row.mileage_km)} km` : "--"}</span>
                 <span>${row.power_hp ? `${intFmt(row.power_hp)} hp` : "--"}</span>
               </div>
             </div>
             <div class="right-align">
               <div class="metric">CO2 Confidence</div>
-              <div class="badge ${co2Kind(row.co2_source_type)}">${safe(row.co2_source_type)}</div>
+              <div class="badge ${co2Kind(row.co2_source_type)}">${escapeHtml(row.co2_source_type)}</div>
             </div>
           </div>
           <div class="opp-grid">
@@ -152,8 +171,8 @@
             <div><div class="metric">Net Margin</div><div class="metric-value good">${eurFmt(row.potential_margin_avg)}</div></div>
           </div>
           <div class="small-actions">
-            <div class="micro">${intFmt(row.es_sample_size)} comparables / ${safe(row.source)}</div>
-            <div class="micro">${safe(row.seller_type)}</div>
+            <div class="micro">${intFmt(row.es_sample_size)} comparables / ${escapeHtml(row.source)}</div>
+            <div class="micro">${escapeHtml(row.seller_type)}</div>
           </div>
         </div>
         <div class="score">
@@ -165,7 +184,7 @@
 
     document.querySelectorAll(".opp").forEach((card) => {
       card.addEventListener("click", () => {
-        const row = rows.find((item) => item.url === card.dataset.url);
+        const row = rows[Number(card.dataset.index)];
         document.querySelectorAll(".opp").forEach((el) => el.classList.remove("active"));
         card.classList.add("active");
         renderDrawer(row);
@@ -181,15 +200,15 @@
     }
     tableBody.innerHTML = rows.slice(0, 40).map((row) => `
       <tr>
-        <td>${safe(row.source)}</td>
-        <td>${safe(row.display_title)}</td>
-        <td>${safe(row.variant_key)}</td>
-        <td>${safe(row.year)}</td>
-        <td>${safe(row.fuel_type)}</td>
+        <td>${escapeHtml(row.source)}</td>
+        <td>${escapeHtml(row.display_title)}</td>
+        <td>${escapeHtml(row.variant_key)}</td>
+        <td>${escapeHtml(row.year)}</td>
+        <td>${escapeHtml(row.fuel_type)}</td>
         <td>${eurFmt(row.price_eur)}</td>
-        <td>${safe(row.co2_display)}</td>
-        <td>${safe(row.co2_source_type)}</td>
-        <td>${safe(row.comparable_match_level)}</td>
+        <td>${escapeHtml(row.co2_display)}</td>
+        <td>${escapeHtml(row.co2_source_type)}</td>
+        <td>${escapeHtml(row.comparable_match_level)}</td>
         <td>${eurFmt(row.es_market_avg)}</td>
         <td>${eurFmt(row.best_break_even)}</td>
         <td>${eurFmt(row.potential_margin_avg)}</td>
@@ -223,7 +242,7 @@
     }
     selectedUrl = null;
     lastExportUrl = data.export_url || "#";
-    if (exportLink) exportLink.href = lastExportUrl;
+    if (exportLink) exportLink.href = safeUrl(lastExportUrl);
     statusEl.textContent = `Completado. ${data.summary.de_count} anuncios DE, ${data.summary.es_count} anuncios ES, ${data.summary.positive_count} oportunidades positivas.`;
     renderSummary(data.summary);
     renderOpportunities(data.opportunities || []);
