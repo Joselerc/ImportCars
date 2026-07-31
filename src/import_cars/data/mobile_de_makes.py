@@ -189,4 +189,3 @@ MOBILE_DE_MAKES = {
     "ZHIDOU": 32032,
     "OTROS": 1400,
 }
-

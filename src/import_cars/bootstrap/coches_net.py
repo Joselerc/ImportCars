@@ -25,7 +25,9 @@ class CochesNetBootstrap:
                 if store:
                     return store.template
             template = await self._create_template()
-            BootstrapStore(key=BOOTSTRAP_KEY, template=template).save(settings=self.settings)
+            BootstrapStore(key=BOOTSTRAP_KEY, template=template).save(
+                settings=self.settings
+            )
             return template
 
     async def _create_template(self) -> BootstrapTemplate:
@@ -70,7 +72,9 @@ class CochesNetBootstrap:
             await page.wait_for_timeout(2000)
 
             if not captured:
-                raise RuntimeError("No se interceptó la petición principal de búsqueda en coches.net")
+                raise RuntimeError(
+                    "No se interceptó la petición principal de búsqueda en coches.net"
+                )
 
             cookies = await context.cookies()
             await context.close()

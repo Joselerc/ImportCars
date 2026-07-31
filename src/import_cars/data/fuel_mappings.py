@@ -11,7 +11,7 @@ COCHES_NET_FUEL_TYPES = {
     "hybrid_plug_in": 5,
     "lpg": 6,
     "cng": 7,
-    "hydrogen": 8
+    "hydrogen": 8,
 }
 
 # Mobile.de fuel type codes (from URL parameters)
@@ -22,6 +22,5 @@ MOBILE_DE_FUEL_TYPES = {
     "hybrid": "HYBRID",
     "lpg": "LPG",
     "cng": "CNG",
-    "hydrogen": "HYDROGEN"
+    "hydrogen": "HYDROGEN",
 }
-

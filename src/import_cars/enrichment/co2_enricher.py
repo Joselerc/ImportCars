@@ -4,11 +4,21 @@ from typing import Any, Dict, List, Optional
 
 from ..models import NormalizedListing
 from .co2_memory import load_co2_memory, save_co2_memory, upsert_co2_memory
-from .signature import build_model_key, build_variant_key, build_vehicle_signature, normalize_fuel_category, normalize_text
+from .signature import (
+    build_model_key,
+    build_variant_key,
+    build_vehicle_signature,
+    normalize_fuel_category,
+    normalize_text,
+)
 
 
 def _listing_year(listing: NormalizedListing) -> Optional[int]:
-    return listing.first_registration.year if listing.first_registration else listing.production_year
+    return (
+        listing.first_registration.year
+        if listing.first_registration
+        else listing.production_year
+    )
 
 
 def _memory_payload(listing: NormalizedListing) -> Dict[str, Any]:
@@ -25,18 +35,34 @@ def _memory_payload(listing: NormalizedListing) -> Dict[str, Any]:
     }
 
 
-def _near_match_score(listing: NormalizedListing, entry: Dict[str, Any]) -> Optional[int]:
+def _near_match_score(
+    listing: NormalizedListing, entry: Dict[str, Any]
+) -> Optional[int]:
     if normalize_text(listing.make) != normalize_text(entry.get("make")):
         return None
     if build_model_key(listing.model) != (entry.get("model_key") or "na"):
         return None
     listing_variant = build_variant_key(listing)
     entry_variant = entry.get("variant_key") or "na"
-    if listing_variant != "na" and entry_variant != "na" and listing_variant != entry_variant:
+    if (
+        listing_variant != "na"
+        and entry_variant != "na"
+        and listing_variant != entry_variant
+    ):
         return None
-    if listing.fuel_type and entry.get("fuel_type") and normalize_fuel_category(listing.fuel_type) != normalize_fuel_category(entry.get("fuel_type")):
+    if (
+        listing.fuel_type
+        and entry.get("fuel_type")
+        and normalize_fuel_category(listing.fuel_type)
+        != normalize_fuel_category(entry.get("fuel_type"))
+    ):
         return None
-    if listing.transmission and entry.get("transmission") and normalize_text(listing.transmission) != normalize_text(entry.get("transmission")):
+    if (
+        listing.transmission
+        and entry.get("transmission")
+        and normalize_text(listing.transmission)
+        != normalize_text(entry.get("transmission"))
+    ):
         return None
 
     score = 0
@@ -51,8 +77,13 @@ def _near_match_score(listing: NormalizedListing, entry: Dict[str, Any]) -> Opti
         if delta > 10:
             return None
         score += delta
-    if listing.engine_displacement_cc and entry.get("engine_displacement_cc") is not None:
-        delta = abs(listing.engine_displacement_cc - int(entry["engine_displacement_cc"]))
+    if (
+        listing.engine_displacement_cc
+        and entry.get("engine_displacement_cc") is not None
+    ):
+        delta = abs(
+            listing.engine_displacement_cc - int(entry["engine_displacement_cc"])
+        )
         if delta > 250:
             return None
         score += delta // 25

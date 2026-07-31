@@ -14,10 +14,14 @@ class BaseScraper(ABC):
         self.settings = settings or get_settings()
 
     @abstractmethod
-    async def search(self, *, query: dict[str, Any], limit: Optional[int] = None) -> SearchResult:
+    async def search(
+        self, *, query: dict[str, Any], limit: Optional[int] = None
+    ) -> SearchResult:
         """Fetch a single results page for the provided query."""
 
-    async def iterate(self, *, query: dict[str, Any], limit: Optional[int] = None) -> AsyncIterator[NormalizedListing]:
+    async def iterate(
+        self, *, query: dict[str, Any], limit: Optional[int] = None
+    ) -> AsyncIterator[NormalizedListing]:
         fetched = 0
         page = 1
         while True:
@@ -31,7 +35,9 @@ class BaseScraper(ABC):
                 return
             page += 1
 
-    async def gather(self, *, query: dict[str, Any], limit: Optional[int] = None) -> List[NormalizedListing]:
+    async def gather(
+        self, *, query: dict[str, Any], limit: Optional[int] = None
+    ) -> List[NormalizedListing]:
         return [item async for item in self.iterate(query=query, limit=limit)]
 
     async def bounded_gather(
@@ -46,7 +52,9 @@ class BaseScraper(ABC):
 
         async def _run(single_query: dict[str, Any]) -> None:
             async with semaphore:
-                async for listing in self.iterate(query=single_query, limit=limit_per_query):
+                async for listing in self.iterate(
+                    query=single_query, limit=limit_per_query
+                ):
                     results.append(listing)
 
         await asyncio.gather(*(_run(q) for q in queries))

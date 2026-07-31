@@ -19,13 +19,26 @@ def load_co2_memory() -> Dict[str, Dict[str, Any]]:
 
 def save_co2_memory(memory: Dict[str, Dict[str, Any]]) -> None:
     MEMORY_DIR.mkdir(parents=True, exist_ok=True)
-    MEMORY_PATH.write_text(json.dumps(memory, ensure_ascii=False, indent=2), encoding="utf-8")
+    MEMORY_PATH.write_text(
+        json.dumps(memory, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
 
 
-def upsert_co2_memory(memory: Dict[str, Dict[str, Any]], *, signature: str, payload: Dict[str, Any], co2: int) -> None:
+def upsert_co2_memory(
+    memory: Dict[str, Dict[str, Any]],
+    *,
+    signature: str,
+    payload: Dict[str, Any],
+    co2: int,
+) -> None:
     entry = memory.get(signature)
     if entry is None:
-        payload = payload | {"samples": 1, "co2_min": co2, "co2_max": co2, "co2_avg": float(co2)}
+        payload = payload | {
+            "samples": 1,
+            "co2_min": co2,
+            "co2_max": co2,
+            "co2_avg": float(co2),
+        }
         memory[signature] = payload
         return
 

@@ -55,7 +55,9 @@ class BootstrapStore(BaseModel):
         return path
 
     @classmethod
-    def load(cls, key: str, *, settings: Optional[ScraperSettings] = None) -> Optional["BootstrapStore"]:
+    def load(
+        cls, key: str, *, settings: Optional[ScraperSettings] = None
+    ) -> Optional["BootstrapStore"]:
         settings = settings or get_settings()
         path = CACHE_DIR / f"{key}.json"
         if not path.exists():

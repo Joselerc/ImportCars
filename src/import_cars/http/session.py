@@ -6,13 +6,21 @@ from contextlib import asynccontextmanager
 from typing import Any, AsyncIterator, Dict, Iterable, Optional
 
 import httpx
+
 try:
     from curl_cffi import requests as curl_requests  # type: ignore
+
     _HAS_CURL_CFFI = True
 except Exception:  # ImportError u otros problemas de runtime
     curl_requests = None  # type: ignore
     _HAS_CURL_CFFI = False
-from tenacity import AsyncRetrying, RetryError, retry_if_exception_type, stop_after_attempt, wait_exponential
+from tenacity import (
+    AsyncRetrying,
+    RetryError,
+    retry_if_exception_type,
+    stop_after_attempt,
+    wait_exponential,
+)
 
 from ..config import ScraperSettings, get_settings
 
@@ -50,7 +58,9 @@ class AsyncHttpClient:
         )
         self._proxy_cycle: Iterable[Optional[str]]
         if self._settings.proxy_pool:
-            self._proxy_cycle = self._infinite_cycle(str(p) for p in self._settings.proxy_pool)
+            self._proxy_cycle = self._infinite_cycle(
+                str(p) for p in self._settings.proxy_pool
+            )
         else:
             self._proxy_cycle = self._infinite_cycle([None])
 
@@ -99,7 +109,12 @@ class AsyncHttpClient:
 class StealthSession:
     """Cliente síncrono que usa curl_cffi si está disponible, con fallback a httpx.Client."""
 
-    def __init__(self, *, settings: Optional[ScraperSettings] = None, impersonate: str = "chrome124") -> None:
+    def __init__(
+        self,
+        *,
+        settings: Optional[ScraperSettings] = None,
+        impersonate: str = "chrome124",
+    ) -> None:
         self._settings = settings or get_settings()
         headers = DEFAULT_HEADERS | {"user-agent": self._settings.user_agent}
         if _HAS_CURL_CFFI:
@@ -113,7 +128,9 @@ class StealthSession:
             self._is_httpx = False
         else:
             # Fallback a httpx.Client con http2 habilitado
-            self._session = httpx.Client(http2=True, headers=headers, timeout=self._settings.request_timeout)
+            self._session = httpx.Client(
+                http2=True, headers=headers, timeout=self._settings.request_timeout
+            )
             self._is_httpx = True
 
     def request(self, method: str, url: str, **kwargs: Any) -> Any:
@@ -125,7 +142,9 @@ class StealthSession:
         if self._is_httpx:
             response = self._session.request(method, url, **kwargs)
         else:
-            response = self._session.request(method, url, timeout=self._settings.request_timeout, **kwargs)
+            response = self._session.request(
+                method, url, timeout=self._settings.request_timeout, **kwargs
+            )
         if getattr(response, "status_code", 200) >= 400:
             raise HttpError(f"{response.status_code} {method} {url}")
         return response
@@ -138,7 +157,9 @@ class StealthSession:
 
 
 @asynccontextmanager
-async def stealth_context(*, settings: Optional[ScraperSettings] = None, impersonate: str = "chrome124") -> AsyncIterator[StealthSession]:
+async def stealth_context(
+    *, settings: Optional[ScraperSettings] = None, impersonate: str = "chrome124"
+) -> AsyncIterator[StealthSession]:
     loop = asyncio.get_running_loop()
     session = StealthSession(settings=settings, impersonate=impersonate)
     try:
