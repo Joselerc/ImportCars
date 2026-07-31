@@ -78,7 +78,7 @@ class CochesNetScraper(BaseScraper):
         meta = response_data.get("meta", {})
         total_results = meta.get("totalResults", 0)
         if total_results > 0:
-            print(f"Total de anuncios disponibles: {total_results}")
+            logger.info("Total de anuncios disponibles: %s", total_results)
 
         return self._parse_response(
             response_data, filters.page, filters.page_size, limit, filters

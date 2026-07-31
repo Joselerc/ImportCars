@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 
 import pytest
 from pydantic import ValidationError
@@ -6,7 +6,8 @@ from pydantic import ValidationError
 from import_cars.filters import PowerRange, PriceRange, UnifiedFilters, YearRange
 from import_cars.matching import equivalent_vehicle_criteria, listing_matches_filters
 from import_cars.models import NormalizedListing, Registration
-from import_cars.webapp import CalculatorRequest, CompareRequest
+from import_cars.services import PublicCalculationInput
+from import_cars.webapp import CompareRequest
 
 
 def test_rejects_inverted_ranges() -> None:
@@ -94,7 +95,20 @@ def test_web_comparison_rejects_different_vehicle_criteria() -> None:
 
 
 def test_web_calculator_rejects_untrusted_numeric_and_seller_values() -> None:
+    base = {
+        "make": "BMW",
+        "model": "X5 xDrive30d",
+        "first_registration": date(2020, 5, 1),
+        "fuel": "diesel",
+        "displacement_cc": 2993,
+        "seller_type": "particular",
+        "autonomous_community": "Madrid",
+        "municipality": "Madrid",
+    }
     with pytest.raises(ValidationError):
-        CalculatorRequest(purchase_price=-1)
+        PublicCalculationInput(purchase_price=-1, **base)
     with pytest.raises(ValidationError):
-        CalculatorRequest(purchase_price=20_000, seller_type="<script>")
+        PublicCalculationInput(
+            purchase_price=20_000,
+            **{**base, "seller_type": "<script>"},
+        )

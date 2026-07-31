@@ -33,7 +33,7 @@ from .filters import (
 )
 from .matching import equivalent_vehicle_criteria
 from .scrapers import CochesNetScraper, MobileDeHttpScraper
-from .utils import import_calculator, TipoCompra
+from .services import break_even_scenarios
 
 # Configurar logging
 logging.basicConfig(level=logging.INFO)
@@ -489,24 +489,9 @@ def compare(
         coches_listings = [l for l in all_listings if l.source == "coches_net"]
         break_even_data = {}
         for listing in mobile_listings:
-            if listing.price_eur:
-                break_even_data[listing.listing_id] = {
-                    "particular": import_calculator.calcular_costes_importacion(
-                        listing.price_eur,
-                        TipoCompra.PARTICULAR,
-                        listing.co2_emissions_g_km,
-                    )["break_even"],
-                    "empresa_iva": import_calculator.calcular_costes_importacion(
-                        listing.price_eur,
-                        TipoCompra.EMPRESA_IVA,
-                        listing.co2_emissions_g_km,
-                    )["break_even"],
-                    "empresa_margen": import_calculator.calcular_costes_importacion(
-                        listing.price_eur,
-                        TipoCompra.EMPRESA_MARGEN,
-                        listing.co2_emissions_g_km,
-                    )["break_even"],
-                }
+            scenarios = break_even_scenarios(listing)
+            if scenarios:
+                break_even_data[listing.listing_id] = scenarios
 
         opportunities = apply_opportunity_analysis(
             mobile_listings, coches_listings, break_even_data
@@ -856,28 +841,9 @@ def comparar(
         break_even_data = {}
 
         for listing in mobile_listings:
-            if listing.price_eur:
-                # Calcular los 3 escenarios de break-even
-                be_particular = import_calculator.calcular_costes_importacion(
-                    listing.price_eur, TipoCompra.PARTICULAR, listing.co2_emissions_g_km
-                )["break_even"]
-                be_empresa_iva = import_calculator.calcular_costes_importacion(
-                    listing.price_eur,
-                    TipoCompra.EMPRESA_IVA,
-                    listing.co2_emissions_g_km,
-                )["break_even"]
-                be_empresa_margen = import_calculator.calcular_costes_importacion(
-                    listing.price_eur,
-                    TipoCompra.EMPRESA_MARGEN,
-                    listing.co2_emissions_g_km,
-                )["break_even"]
-
-                # Guardar en diccionario
-                break_even_data[listing.listing_id] = {
-                    "particular": be_particular,
-                    "empresa_iva": be_empresa_iva,
-                    "empresa_margen": be_empresa_margen,
-                }
+            scenarios = break_even_scenarios(listing)
+            if scenarios:
+                break_even_data[listing.listing_id] = scenarios
 
         oportunidades = apply_opportunity_analysis(
             mobile_listings, coches_listings, break_even_data

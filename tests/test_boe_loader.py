@@ -6,7 +6,13 @@ from pathlib import Path
 
 import pytest
 
-from import_cars.fiscal_data import BoeParseError, install_boe_dataset, parse_boe_xml
+from import_cars.fiscal_data import (
+    BoeParseError,
+    install_boe_dataset,
+    parse_boe_xml,
+    resolver_registro_valor_tablas,
+    resolver_valor_tablas,
+)
 
 FIXTURE = Path(__file__).parent / "fixtures" / "boe" / "hac_sample.xml"
 
@@ -59,3 +65,51 @@ def test_rejects_missing_required_annex() -> None:
 
     with pytest.raises(BoeParseError, match="ANEXO IV"):
         parse_boe_xml(malformed)
+
+
+def test_resolves_an_unambiguous_official_value(tmp_path: Path) -> None:
+    database = tmp_path / "fiscal.sqlite3"
+    install_boe_dataset(database, parse_boe_xml(FIXTURE.read_bytes()))
+
+    match = resolver_registro_valor_tablas(
+        "Abarth",
+        "124 1.4 Spider",
+        2018,
+        displacement_cc=1368,
+        power_kw=125,
+        database_path=database,
+    )
+
+    assert match is not None
+    assert match.model_type == "124 1.4 Spider"
+    assert match.order_code == "HAC/1501/2025"
+    assert match.value_eur == 33_400
+    assert resolver_valor_tablas(
+        "Abarth", "124 1.4 Spider", 2018, database_path=database
+    ) == 33_400
+
+
+def test_resolver_returns_none_when_database_or_vehicle_is_missing(tmp_path: Path) -> None:
+    assert (
+        resolver_valor_tablas(
+            "BMW", "X5", 2020, database_path=tmp_path / "missing.db"
+        )
+        is None
+    )
+
+
+def test_resolver_never_crosses_to_a_different_model(tmp_path: Path) -> None:
+    database = tmp_path / "fiscal.sqlite3"
+    install_boe_dataset(database, parse_boe_xml(FIXTURE.read_bytes()))
+
+    assert (
+        resolver_valor_tablas(
+            "Abarth",
+            "125 1.4 Spider",
+            2018,
+            displacement_cc=1368,
+            power_kw=125,
+            database_path=database,
+        )
+        is None
+    )

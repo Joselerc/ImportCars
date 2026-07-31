@@ -17,17 +17,27 @@ from import_cars.fiscal_data.boe import (
     load_boe_year,
     parse_boe_xml,
 )
+from import_cars.fiscal_data.resolver import (
+    DEFAULT_DATABASE_PATH,
+    BoeValueResolution,
+    resolver_registro_valor_tablas,
+    resolver_valor_tablas,
+)
 
 __all__ = [
     "DEFAULT_BOE_XML_URL",
+    "DEFAULT_DATABASE_PATH",
     "BoeDataset",
     "BoeDepreciationBand",
     "BoeGenericValueBand",
     "BoeLoadSummary",
     "BoeParseError",
+    "BoeValueResolution",
     "BoeVehicleValue",
     "download_boe_xml",
     "install_boe_dataset",
     "load_boe_year",
     "parse_boe_xml",
+    "resolver_registro_valor_tablas",
+    "resolver_valor_tablas",
 ]

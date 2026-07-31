@@ -238,6 +238,21 @@ Para otro ejercicio hay que indicar también con `--url` el XML oficial de la
 orden anual publicado en `boe.es`. La carga valida el ejercicio, registra la
 orden y su huella SHA-256, y reemplaza atómicamente solo esa misma versión.
 
+## Calculadora pública
+
+La ruta `/calculadora` acepta un enlace de mobile.de/AutoScout24 o los datos
+manuales. Consulta coches.net bajo demanda, aplica el motor fiscal y muestra
+únicamente precio final, ahorro, desglose, honorarios y avisos para el cliente.
+
+```bash
+import-cars-web
+# http://127.0.0.1:8000/calculadora
+```
+
+Las solicitudes de presupuesto con consentimiento se guardan en la tabla
+`public_leads` de la misma SQLite local. El dashboard interno conserva su
+autenticación Basic de forma independiente.
+
 ## 📈 Estadísticas del Proyecto
 
 ### Funcionalidad Completada
@@ -248,6 +263,8 @@ orden y su huella SHA-256, y reemplaza atómicamente solo esa misma versión.
 - ✅ Comparación de mercados (100%)
 - ✅ Scraper mobile.de HTTP con payload Next.js y fallback DOM
 - ✅ Datos BOE 2026 versionados en SQLite local
+- ✅ `fiscal_engine` integrado como única fuente de cálculo
+- ✅ Calculadora pública con referencia española bajo demanda
 
 ### Archivos Clave
 - `src/import_cars/filters.py` - Sistema de filtros
@@ -255,16 +272,16 @@ orden y su huella SHA-256, y reemplaza atómicamente solo esa misma versión.
 - `src/import_cars/scrapers/mobile_de_http.py` - Scraper HTTP principal
 - `src/import_cars/scrapers/mobile_de.py` - Vía Playwright de diagnóstico/fallback
 - `src/import_cars/fiscal_data/boe.py` - Ingesta anual de datos oficiales
+- `src/import_cars/services/public_calculator.py` - Cálculo orientado al cliente
 - `src/import_cars/exporters.py` - Exportación de datos
 - `src/import_cars/cli.py` - Interfaz de línea de comandos
 - `examples/usage_examples.md` - Ejemplos de uso
 
 ## 🚧 Próximos Pasos
 
-1. **Integrar `fiscal_engine`** cuando se entregue el paquete validado
-2. **Completar la calculadora pública** con el prototipo visual definitivo
-3. **Rotar la sesión de coches.net** y limpiar el historial tras recuperar acceso a GitHub
-4. **Aplazar infraestructura persistente** hasta validar la necesidad de la v2
+1. **Revisar visualmente la calculadora pública** en un navegador conectado
+2. **Rotar la sesión de coches.net** y limpiar el historial después de la confirmación
+3. **Aplazar infraestructura persistente** hasta validar la necesidad de la v2
 
 ## 🤝 Contribución
 
@@ -277,6 +294,6 @@ El proyecto está estructurado para facilitar contribuciones:
 
 ---
 
-**Estado**: ✅ Comparación equivalente mobile.de + coches.net | 🚧 Motor fiscal pendiente de integrar
+**Estado**: ✅ Comparación equivalente mobile.de + coches.net | ✅ Motor fiscal y calculadora pública integrados
 
 **Objetivo**: Identificar oportunidades de importación de vehículos entre mercados alemán y español.

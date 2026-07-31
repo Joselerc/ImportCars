@@ -37,7 +37,6 @@ from ..models import (
     Seller,
 )
 from ..utils import build_mobile_de_search_url
-from ..utils.import_calculator import TipoCompra, import_calculator
 
 
 class MobileDeHttpScraper:
@@ -203,18 +202,7 @@ class MobileDeHttpScraper:
 
     def _extract_next_search_results(self, html_content: str) -> dict | None:
         """Extrae ``searchResults`` de los chunks RSC embebidos por Next.js."""
-        chunks = []
-        pattern = re.compile(
-            r'self\.__next_f\.push\(\[1,("(?:\\.|[^"\\])*")\]\)',
-            re.DOTALL,
-        )
-        for match in pattern.finditer(html_content):
-            try:
-                chunks.append(json.loads(match.group(1)))
-            except (json.JSONDecodeError, TypeError):
-                continue
-
-        decoded = "".join(chunks)
+        decoded = self._decode_next_chunks(html_content)
         marker = '"searchResults":'
         start = decoded.find(marker)
         if start < 0:
@@ -225,6 +213,135 @@ class MobileDeHttpScraper:
         except json.JSONDecodeError:
             return None
         return payload if isinstance(payload, dict) else None
+
+    @staticmethod
+    def _decode_next_chunks(html_content: str) -> str:
+        """Decode the string chunks used by the current Next.js RSC pages."""
+
+        chunks = []
+        pattern = re.compile(
+            r'self\.__next_f\.push\(\[1,("(?:\\.|[^"\\])*")\]\)',
+            re.DOTALL,
+        )
+        for match in pattern.finditer(html_content):
+            try:
+                chunks.append(json.loads(match.group(1)))
+            except (json.JSONDecodeError, TypeError):
+                continue
+        return "".join(chunks)
+
+    def _extract_next_detail_listing(
+        self, html_content: str, vehicle_id: str, url: str
+    ) -> NormalizedListing | None:
+        """Normalize the canonical listing object embedded in a detail page."""
+
+        decoded = self._decode_next_chunks(html_content)
+        marker = '"listing":'
+        position = 0
+        payload = None
+        while True:
+            position = decoded.find(marker, position)
+            if position < 0:
+                break
+            try:
+                candidate, _ = json.JSONDecoder().raw_decode(
+                    decoded, position + len(marker)
+                )
+            except json.JSONDecodeError:
+                position += len(marker)
+                continue
+            if isinstance(candidate, dict) and str(candidate.get("id")) == vehicle_id:
+                payload = candidate
+                break
+            position += len(marker)
+        if payload is None:
+            return None
+
+        attributes = {
+            item.get("tag"): item.get("value")
+            for item in payload.get("attributes") or []
+            if isinstance(item, dict) and item.get("tag")
+        }
+        price = payload.get("price") or {}
+        gross = price.get("grs") or price.get("gross") or {}
+        net = price.get("net") or {}
+        price_eur = gross.get("amount")
+        registration = None
+        match = re.search(r"(\d{1,2})/(\d{4})", attributes.get("firstRegistration") or "")
+        if match:
+            registration = Registration(year=int(match.group(2)), month=int(match.group(1)))
+
+        power_kw = None
+        power_hp = None
+        power_match = re.search(
+            r"(\d+)\s*kW(?:\s*\((\d+)\s*(?:cv|PS|hp)\))?",
+            attributes.get("power") or "",
+            re.IGNORECASE,
+        )
+        if power_match:
+            power_kw = int(power_match.group(1))
+            power_hp = int(power_match.group(2)) if power_match.group(2) else round(power_kw * 1.35962)
+
+        co2 = None
+        for tag, value in attributes.items():
+            if "co2" in tag.casefold():
+                co2 = self._localized_integer(str(value))
+                if co2 is not None:
+                    break
+        contact = payload.get("contact") or {}
+        rating = contact.get("rating") or {}
+        phones = contact.get("phones") or []
+        seller = Seller(
+            type="dealer" if contact.get("enumType") == "DEALER" else "private",
+            name=contact.get("name"),
+            rating=rating.get("score"),
+            rating_count=rating.get("totalCount") or rating.get("count"),
+            phone=phones[0].get("number") if phones else None,
+        )
+        image_urls = []
+        for image in payload.get("images") or []:
+            uri = image.get("uri") if isinstance(image, dict) else None
+            if uri:
+                image_urls.append(uri if uri.startswith("http") else f"https://{uri}")
+        make = payload.get("make") or {}
+        model = payload.get("model") or {}
+
+        return NormalizedListing(
+            listing_id=vehicle_id,
+            source=self.source,
+            url=url,
+            scraped_at=datetime.now(UTC),
+            title=payload.get("title"),
+            make=make.get("localized"),
+            model=model.get("localized"),
+            version=attributes.get("trimLine") or payload.get("subTitle"),
+            price_eur=float(price_eur) if price_eur is not None else None,
+            price_net_eur=float(net.get("amount")) if net.get("amount") is not None else None,
+            price_original=(
+                Price(amount=float(price_eur), currency_code=gross.get("currency") or "EUR")
+                if price_eur is not None
+                else None
+            ),
+            vat_deductible=net.get("amount") is not None,
+            mileage_km=self._localized_integer(attributes.get("mileage")),
+            first_registration=registration,
+            fuel_type=attributes.get("fuel"),
+            transmission=attributes.get("transmission"),
+            power_hp=power_hp,
+            power_kw=power_kw,
+            engine_displacement_cc=self._localized_integer(attributes.get("cubicCapacity")),
+            body_type=attributes.get("category"),
+            color_exterior=attributes.get("color"),
+            emission_class=attributes.get("emissionClass"),
+            co2_emissions_g_km=co2,
+            co2_original_g_km=co2,
+            co2_source_type="listing" if co2 is not None else None,
+            co2_confidence=1.0 if co2 is not None else 0.0,
+            images=image_urls,
+            seller=seller,
+            previous_owners=self._localized_integer(attributes.get("numberOfPreviousOwners")),
+            metadata=ListingMetadata(vehicle_id=vehicle_id),
+        )
 
     def _extract_summary_listings(
         self, payload: dict | None
@@ -445,10 +562,19 @@ class MobileDeHttpScraper:
             print(f"      ERROR obteniendo detalle {vehicle_id}: {e}")
             return None
 
+    def get_listing(self, vehicle_id: str) -> NormalizedListing | None:
+        """Public on-demand detail lookup used by the customer URL parser."""
+
+        return self._fetch_detail(vehicle_id)
+
     def _parse_detail_page(
         self, html_content: str, vehicle_id: str, url: str
     ) -> NormalizedListing | None:
         """Parsear página de detalle completa"""
+        embedded = self._extract_next_detail_listing(html_content, vehicle_id, url)
+        if embedded is not None:
+            return embedded
+
         tree = HTMLParser(html.unescape(html_content))
         images = self._extract_images(tree, html_content)
 
@@ -855,167 +981,3 @@ class MobileDeHttpScraper:
             data["color_exterior"] = color_match.group(1).strip()
 
         return data
-
-    def _print_import_analysis(self, listings: list[NormalizedListing]) -> None:
-        """Imprime análisis de costes de importación para cada anuncio"""
-
-        for idx, listing in enumerate(listings, 1):
-            print(f"\n{'-' * 80}")
-            print(f"ANUNCIO #{idx}")
-            print(f"{'-' * 80}")
-
-            # Información básica
-            print(f"Vehiculo: {listing.title}")
-            print(f"URL: {listing.url}")
-            print(f"Precio Alemania: {listing.price_eur:,.2f} EUR")
-
-            # Tipo de vendedor
-            seller_type_label = (
-                "Concesionario"
-                if listing.seller and listing.seller.type == "dealer"
-                else "Particular"
-            )
-            seller_name = (
-                f" ({listing.seller.name})"
-                if listing.seller and listing.seller.name
-                else ""
-            )
-            print(f"{seller_type_label}{seller_name}")
-
-            # Datos técnicos relevantes
-            if listing.mileage_km:
-                print(f"Kilometraje: {listing.mileage_km:,} km")
-            if listing.first_registration:
-                print(
-                    f"Primera matriculacion: {listing.first_registration.month}/{listing.first_registration.year}"
-                )
-            if listing.power_hp:
-                print(f"Potencia: {listing.power_hp} CV")
-
-            # CO2 y cálculo de costes
-            if listing.co2_emissions_g_km:
-                print(f"CO2: {listing.co2_emissions_g_km} g/km")
-                self._calculate_and_print_import_costs(
-                    listing, listing.co2_emissions_g_km
-                )
-            else:
-                print("ADVERTENCIA: CO2 no disponible")
-                print("\nCalculando rangos segun posibles emisiones de CO2:")
-                self._print_co2_scenarios(listing)
-
-    def _calculate_and_print_import_costs(
-        self, listing: NormalizedListing, co2: int
-    ) -> None:
-        """Calcula y muestra los costes de importación para un CO2 específico"""
-
-        if not listing.price_eur:
-            print("❌ No se puede calcular (precio no disponible)")
-            return
-
-        # Determinar tipo de compra según el vendedor
-        is_dealer = listing.seller and listing.seller.type == "dealer"
-
-        print("\nCOSTES DE IMPORTACION:")
-
-        if is_dealer:
-            # Mostrar ambos casos de empresa
-            print("\n  Caso 1: Compra a EMPRESA (IVA Aleman)")
-            costes_iva = import_calculator.calcular_costes_importacion(
-                listing.price_eur, TipoCompra.EMPRESA_IVA, co2
-            )
-            print(f"     Precio Alemania:    {listing.price_eur:>10,.2f}€")
-            print(f"     + ITP:              {costes_iva['itp']:>10,.2f}€")
-            print(
-                f"     + IEDMT ({costes_iva['tasa_iedmt']}%):    {costes_iva['iedmt']:>10,.2f}€"
-            )
-            print(f"     + Transporte:       {costes_iva['transporte']:>10,.2f}€")
-            print(f"     + ITV:              {costes_iva['itv_tasa']:>10,.2f}€")
-            print(f"     + Traducciones:     {costes_iva['traducciones']:>10,.2f}€")
-            print(f"     + IVTM:             {costes_iva['ivtm']:>10,.2f}€")
-            print(f"     + Placas:           {costes_iva['placas']:>10,.2f}€")
-            print(f"     {'-' * 36}")
-            print(f"     = BREAK-EVEN:    {costes_iva['break_even']:>10,.2f} EUR")
-
-            print("\n  Caso 2: Compra a EMPRESA (Regimen Margen 25a)")
-            costes_margen = import_calculator.calcular_costes_importacion(
-                listing.price_eur, TipoCompra.EMPRESA_MARGEN, co2
-            )
-            print(f"     Precio Alemania:    {listing.price_eur:>10,.2f}€")
-            print(f"     + ITP:              {costes_margen['itp']:>10,.2f}€")
-            print(
-                f"     + IEDMT ({costes_margen['tasa_iedmt']}%):    {costes_margen['iedmt']:>10,.2f}€"
-            )
-            print(
-                f"     + Costes base:      {costes_margen['costes_base_total']:>10,.2f}€"
-            )
-            print(f"     {'-' * 36}")
-            print(f"     = BREAK-EVEN:    {costes_margen['break_even']:>10,.2f} EUR")
-
-            # Destacar el mejor
-            print(
-                f"\n  Rango de precio en Espana: {costes_iva['break_even']:,.2f} EUR - {costes_margen['break_even']:,.2f} EUR"
-            )
-        else:
-            # Particular
-            print("\n  Compra a PARTICULAR")
-            costes = import_calculator.calcular_costes_importacion(
-                listing.price_eur, TipoCompra.PARTICULAR, co2
-            )
-            print(f"     Precio Alemania:    {listing.price_eur:>10,.2f}€")
-            print(f"     + ITP (4%):         {costes['itp']:>10,.2f}€")
-            print(
-                f"     + IEDMT ({costes['tasa_iedmt']}%):    {costes['iedmt']:>10,.2f}€"
-            )
-            print(f"     + Transporte:       {costes['transporte']:>10,.2f}€")
-            print(f"     + ITV:              {costes['itv_tasa']:>10,.2f}€")
-            print(f"     + Traducciones:     {costes['traducciones']:>10,.2f}€")
-            print(f"     + IVTM:             {costes['ivtm']:>10,.2f}€")
-            print(f"     + Placas:           {costes['placas']:>10,.2f}€")
-            print(f"     {'-' * 36}")
-            print(f"     = BREAK-EVEN:    {costes['break_even']:>10,.2f} EUR")
-
-    def _print_co2_scenarios(self, listing: NormalizedListing) -> None:
-        """Muestra escenarios de coste según diferentes rangos de CO2"""
-
-        if not listing.price_eur:
-            print("❌ No se puede calcular (precio no disponible)")
-            return
-
-        is_dealer = listing.seller and listing.seller.type == "dealer"
-
-        # Escenarios de CO2
-        scenarios = [
-            ("MEJOR CASO (CO2 <=120 g/km, IEDMT 0%)", 120),
-            ("CASO MEDIO (CO2 121-159 g/km, IEDMT 4.75%)", 140),
-            ("PEOR CASO (CO2 >=200 g/km, IEDMT 14.75%)", 200),
-        ]
-
-        print()
-        for label, co2 in scenarios:
-            print(f"  {'-' * 76}")
-            print(f"  {label}")
-            print(f"  {'-' * 76}")
-
-            if is_dealer:
-                # Mostrar rango para empresa
-                costes_iva = import_calculator.calcular_costes_importacion(
-                    listing.price_eur, TipoCompra.EMPRESA_IVA, co2
-                )
-                costes_margen = import_calculator.calcular_costes_importacion(
-                    listing.price_eur, TipoCompra.EMPRESA_MARGEN, co2
-                )
-                print(
-                    f"  Precio:       {listing.price_eur:>10,.2f}€ + IEDMT ({costes_iva['tasa_iedmt']}%): {costes_iva['iedmt']:,.2f}€ + Costes: {costes_iva['costes_base_total']:,.2f}€"
-                )
-                print(
-                    f"  Break-even: {costes_iva['break_even']:,.2f} EUR - {costes_margen['break_even']:,.2f} EUR"
-                )
-            else:
-                # Particular
-                costes = import_calculator.calcular_costes_importacion(
-                    listing.price_eur, TipoCompra.PARTICULAR, co2
-                )
-                print(
-                    f"  Precio:       {listing.price_eur:>10,.2f}€ + ITP: {costes['itp']:,.2f}€ + IEDMT ({costes['tasa_iedmt']}%): {costes['iedmt']:,.2f}€ + Costes: {costes['costes_base_total']:,.2f}€"
-                )
-                print(f"  Break-even: {costes['break_even']:,.2f} EUR")

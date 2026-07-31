@@ -17,9 +17,18 @@ from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, HttpUrl, model_validator
 
-from .utils.import_calculator import TipoCompra, import_calculator
+from .enrichment.signature import normalize_fuel_category
+from .services import (
+    ListingParseError,
+    PublicCalculationInput,
+    PublicLeadInput,
+    SpanishMarketReferenceService,
+    calculate_for_customer,
+    parse_listing_url,
+    save_public_lead,
+)
 
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
@@ -91,6 +100,9 @@ class InMemoryRateLimiter:
 
 compare_rate_limit = InMemoryRateLimiter(requests=3, window_seconds=60)
 calculator_rate_limit = InMemoryRateLimiter(requests=30, window_seconds=60)
+market_reference_service = SpanishMarketReferenceService(
+    ttl_seconds=int(os.getenv("IMPORT_CARS_MARKET_CACHE_TTL", "900"))
+)
 
 
 class CompareRequest(BaseModel):
@@ -270,17 +282,8 @@ class CompareRequest(BaseModel):
         return self
 
 
-class CalculatorRequest(BaseModel):
-    purchase_price: float = Field(gt=0, le=5_000_000)
-    sale_price: float | None = Field(None, gt=0, le=5_000_000)
-    co2: int | None = Field(None, ge=0, le=1_000)
-    seller_type: str = "EmpresaIVA"
-
-    @model_validator(mode="after")
-    def validate_seller_type(self):
-        if self.seller_type not in {"Particular", "EmpresaIVA", "EmpresaMargen"}:
-            raise ValueError("seller_type no reconocido")
-        return self
+class ListingUrlRequest(BaseModel):
+    url: HttpUrl
 
 
 FLOAT_FIELDS = {
@@ -339,44 +342,11 @@ def _avg(values: list[float | None]) -> float | None:
 
 
 def _co2_value(row: dict) -> int | None:
-    return (
-        _to_int(row.get("co2_g_km"))
-        or _to_int(row.get("co2_original_g_km"))
-        or _to_int(row.get("co2_inferred_g_km"))
-    )
-
-
-def _pick_tipo(row: dict) -> TipoCompra:
-    scenarios = {
-        TipoCompra.PARTICULAR: _to_float(row.get("break_even_particular")),
-        TipoCompra.EMPRESA_IVA: _to_float(row.get("break_even_empresa_iva")),
-        TipoCompra.EMPRESA_MARGEN: _to_float(row.get("break_even_empresa_margen")),
-    }
-    best_break_even = _to_float(row.get("best_break_even"))
-    available = {tipo: value for tipo, value in scenarios.items() if value is not None}
-    if best_break_even is not None and available:
-        return min(
-            available, key=lambda tipo: abs((available[tipo] or 0) - best_break_even)
-        )
-    if str(row.get("seller_type") or "").lower() == "private":
-        return TipoCompra.PARTICULAR
-    return TipoCompra.EMPRESA_IVA
-
-
-def _cost_breakdown(row: dict) -> dict | None:
-    price = _to_float(row.get("price_eur"))
-    if price is None:
-        return None
-    tipo = _pick_tipo(row)
-    breakdown = import_calculator.calcular_costes_importacion(
-        price, tipo, _co2_value(row)
-    )
-    es_market_avg = _to_float(row.get("es_market_avg"))
-    if es_market_avg is not None:
-        breakdown.update(
-            import_calculator.calcular_beneficio_venta(breakdown, es_market_avg)
-        )
-    return breakdown
+    for field in ("co2_g_km", "co2_original_g_km", "co2_inferred_g_km"):
+        value = _to_int(row.get(field))
+        if value is not None:
+            return value
+    return None
 
 
 def _normalize_row(row: dict[str, str]) -> dict:
@@ -390,9 +360,7 @@ def _normalize_row(row: dict[str, str]) -> dict:
         filter(None, [data.get("make"), data.get("model"), data.get("variant_key")])
     )
     data["image_url"] = data.get("image_url") or ""
-    data["cost_breakdown"] = (
-        _cost_breakdown(data) if data.get("source") == "mobile_de" else None
-    )
+    data["cost_breakdown"] = None
     return data
 
 
@@ -666,6 +634,57 @@ def _page_context(
     }
 
 
+def _parsed_listing_payload(listing) -> dict:
+    registration = listing.first_registration
+    first_registration = None
+    if registration:
+        first_registration = f"{registration.year:04d}-{registration.month or 1:02d}-01"
+    fuel = normalize_fuel_category(listing.fuel_type)
+    fuel_map = {
+        "gasoline": "gasolina",
+        "diesel": "diesel",
+        "electric": "electrico",
+        "hybrid": "hibrido",
+        "phev": "phev",
+        "lpg": "glp",
+    }
+    is_private = listing.seller and listing.seller.type == "private"
+    seller_type = (
+        "particular"
+        if is_private
+        else "profesional_iva"
+        if listing.vat_deductible
+        else "profesional_margen"
+    )
+    payload = {
+        "source": listing.source,
+        "source_url": str(listing.url),
+        "title": listing.title,
+        "make": listing.make,
+        "model": listing.model,
+        "version": listing.version,
+        "first_registration": first_registration,
+        "purchase_price": listing.price_eur,
+        "fuel": fuel_map.get(fuel, "otro"),
+        "displacement_cc": listing.engine_displacement_cc,
+        "co2_gkm": _co2_value(listing.model_dump()),
+        "mileage_km": listing.mileage_km,
+        "power_kw": listing.power_kw,
+        "seller_type": seller_type,
+        "vat_deductible": listing.vat_deductible,
+        "co2_confirmed": listing.co2_original_g_km is not None,
+    }
+    required = (
+        "make",
+        "model",
+        "first_registration",
+        "purchase_price",
+        "displacement_cc",
+    )
+    payload["missing_fields"] = [field for field in required if not payload[field]]
+    return payload
+
+
 @app.get("/", response_class=HTMLResponse)
 async def dashboard(
     request: Request, _access: None = Depends(_require_internal_access)
@@ -724,20 +743,18 @@ async def reports(request: Request, _access: None = Depends(_require_internal_ac
     return templates.TemplateResponse(request, "reports.html", context)
 
 
+@app.get("/calculadora", response_class=HTMLResponse)
 @app.get("/import-calculator", response_class=HTMLResponse)
-async def calculator(
-    request: Request, _access: None = Depends(_require_internal_access)
-):
-    context = _page_context(
-        request, "calculator", "Import Calculator", "Germany to Spain cost simulator"
+async def calculator(request: Request):
+    return templates.TemplateResponse(
+        request,
+        "public_calculator.html",
+        {
+            "request": request,
+            "management_fee": float(os.getenv("IMPORT_CARS_MANAGEMENT_FEE", "900")),
+            "whatsapp_number": os.getenv("IMPORT_CARS_WHATSAPP_NUMBER", ""),
+        },
     )
-    context["calculator_defaults"] = {
-        "purchase_price": 29500,
-        "sale_price": 43990,
-        "co2": 179,
-        "seller_type": "EmpresaIVA",
-    }
-    return templates.TemplateResponse(request, "import_calculator.html", context)
 
 
 @app.get("/exports/{filename}")
@@ -787,50 +804,37 @@ async def compare(
     return _parse_csv(export_path)
 
 
-@app.post("/api/import-calculator")
-async def import_calculator_api(
-    request: CalculatorRequest,
-    _access: None = Depends(_require_internal_access),
+@app.post("/api/public/parse-listing")
+async def parse_public_listing(
+    request: ListingUrlRequest,
     _rate_limit: None = Depends(calculator_rate_limit),
 ) -> dict:
-    seller_map = {
-        "Particular": TipoCompra.PARTICULAR,
-        "EmpresaIVA": TipoCompra.EMPRESA_IVA,
-        "EmpresaMargen": TipoCompra.EMPRESA_MARGEN,
-    }
-    selected_tipo = seller_map.get(request.seller_type, TipoCompra.EMPRESA_IVA)
-    selected = import_calculator.calcular_costes_importacion(
-        request.purchase_price, selected_tipo, request.co2
-    )
-    selected_profit = (
-        import_calculator.calcular_beneficio_venta(selected, request.sale_price)
-        if request.sale_price is not None
-        else None
-    )
+    try:
+        listing = await asyncio.to_thread(parse_listing_url, str(request.url))
+    except ListingParseError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return _parsed_listing_payload(listing)
 
-    scenarios = []
-    for tipo in TipoCompra:
-        costs = import_calculator.calcular_costes_importacion(
-            request.purchase_price, tipo, request.co2
-        )
-        result = {"tipo": tipo.value, **costs}
-        if request.sale_price is not None:
-            result.update(
-                import_calculator.calcular_beneficio_venta(costs, request.sale_price)
-            )
-        scenarios.append(result)
 
-    best = min(scenarios, key=lambda item: item["break_even"]) if scenarios else None
-    return {
-        "selected": {
-            **selected,
-            **(selected_profit or {}),
-            "tipo": selected_tipo.value,
-        },
-        "scenarios": scenarios,
-        "best": best,
-        "sale_price": request.sale_price,
-    }
+@app.post("/api/public/calculate")
+async def public_calculator_api(
+    request: PublicCalculationInput,
+    _rate_limit: None = Depends(calculator_rate_limit),
+) -> dict:
+    result = await calculate_for_customer(
+        request,
+        market_service=market_reference_service,
+    )
+    return result.model_dump(mode="json")
+
+
+@app.post("/api/public/leads")
+async def public_lead_api(
+    request: PublicLeadInput,
+    _rate_limit: None = Depends(calculator_rate_limit),
+) -> dict[str, bool]:
+    await asyncio.to_thread(save_public_lead, request)
+    return {"accepted": True}
 
 
 def main() -> None:
