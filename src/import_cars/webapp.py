@@ -3,13 +3,18 @@ from __future__ import annotations
 import asyncio
 import csv
 import os
+import secrets
 import sys
+import time
+from collections import defaultdict, deque
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Annotated
 
 import uvicorn
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Request, status
 from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field, model_validator
@@ -23,6 +28,69 @@ TEMPLATES_DIR = BASE_DIR / "templates"
 app = FastAPI(title="Import Cars Local")
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
+internal_security = HTTPBasic(auto_error=False)
+
+
+def _require_internal_access(
+    request: Request,
+    credentials: Annotated[HTTPBasicCredentials | None, Depends(internal_security)],
+) -> None:
+    configured_username = os.getenv("IMPORT_CARS_INTERNAL_USERNAME")
+    configured_password = os.getenv("IMPORT_CARS_INTERNAL_PASSWORD")
+
+    if not configured_username or not configured_password:
+        client_host = request.client.host if request.client else ""
+        if client_host in {"127.0.0.1", "::1", "localhost", "testclient"}:
+            return
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Configura las credenciales internas antes de publicar el dashboard.",
+        )
+
+    valid = (
+        credentials is not None
+        and secrets.compare_digest(
+            credentials.username.encode("utf-8"),
+            configured_username.encode("utf-8"),
+        )
+        and secrets.compare_digest(
+            credentials.password.encode("utf-8"),
+            configured_password.encode("utf-8"),
+        )
+    )
+    if not valid:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Credenciales internas no válidas.",
+            headers={"WWW-Authenticate": "Basic"},
+        )
+
+
+class InMemoryRateLimiter:
+    def __init__(self, *, requests: int, window_seconds: int) -> None:
+        self.requests = requests
+        self.window_seconds = window_seconds
+        self._events: dict[str, deque[float]] = defaultdict(deque)
+        self._lock = asyncio.Lock()
+
+    async def __call__(self, request: Request) -> None:
+        client_host = request.client.host if request.client else "unknown"
+        now = time.monotonic()
+        cutoff = now - self.window_seconds
+        async with self._lock:
+            events = self._events[client_host]
+            while events and events[0] <= cutoff:
+                events.popleft()
+            if len(events) >= self.requests:
+                raise HTTPException(
+                    status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                    detail="Demasiadas solicitudes. Inténtalo de nuevo en unos minutos.",
+                )
+            events.append(now)
+
+
+compare_rate_limit = InMemoryRateLimiter(requests=3, window_seconds=60)
+calculator_rate_limit = InMemoryRateLimiter(requests=30, window_seconds=60)
 
 
 class CompareRequest(BaseModel):
@@ -599,7 +667,9 @@ def _page_context(
 
 
 @app.get("/", response_class=HTMLResponse)
-async def dashboard(request: Request):
+async def dashboard(
+    request: Request, _access: None = Depends(_require_internal_access)
+):
     return templates.TemplateResponse(
         request,
         "dashboard.html",
@@ -619,7 +689,9 @@ async def health() -> dict[str, str]:
 
 
 @app.get("/comparisons", response_class=HTMLResponse)
-async def comparisons(request: Request):
+async def comparisons(
+    request: Request, _access: None = Depends(_require_internal_access)
+):
     return templates.TemplateResponse(
         request,
         "comparisons.html",
@@ -633,7 +705,7 @@ async def comparisons(request: Request):
 
 
 @app.get("/reports", response_class=HTMLResponse)
-async def reports(request: Request):
+async def reports(request: Request, _access: None = Depends(_require_internal_access)):
     items = _report_entries()
     context = _page_context(
         request,
@@ -653,7 +725,9 @@ async def reports(request: Request):
 
 
 @app.get("/import-calculator", response_class=HTMLResponse)
-async def calculator(request: Request):
+async def calculator(
+    request: Request, _access: None = Depends(_require_internal_access)
+):
     context = _page_context(
         request, "calculator", "Import Calculator", "Germany to Spain cost simulator"
     )
@@ -667,7 +741,10 @@ async def calculator(request: Request):
 
 
 @app.get("/exports/{filename}")
-async def export_file(filename: str) -> FileResponse:
+async def export_file(
+    filename: str,
+    _access: None = Depends(_require_internal_access),
+) -> FileResponse:
     safe_name = Path(filename).name
     if safe_name != filename:
         raise HTTPException(status_code=404, detail="Archivo no encontrado")
@@ -678,7 +755,11 @@ async def export_file(filename: str) -> FileResponse:
 
 
 @app.post("/api/compare")
-async def compare(request: CompareRequest) -> dict:
+async def compare(
+    request: CompareRequest,
+    _access: None = Depends(_require_internal_access),
+    _rate_limit: None = Depends(compare_rate_limit),
+) -> dict:
     if not _has_search_seed(request):
         raise HTTPException(
             status_code=400,
@@ -707,7 +788,11 @@ async def compare(request: CompareRequest) -> dict:
 
 
 @app.post("/api/import-calculator")
-async def import_calculator_api(request: CalculatorRequest) -> dict:
+async def import_calculator_api(
+    request: CalculatorRequest,
+    _access: None = Depends(_require_internal_access),
+    _rate_limit: None = Depends(calculator_rate_limit),
+) -> dict:
     seller_map = {
         "Particular": TipoCompra.PARTICULAR,
         "EmpresaIVA": TipoCompra.EMPRESA_IVA,
