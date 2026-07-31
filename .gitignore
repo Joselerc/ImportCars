@@ -7,16 +7,29 @@ __pycache__/
 env/
 venv/
 .venv/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
 
-# Debug files
+# Browser profiles and debug artefacts
+playwright-coches-net-profile/
+debug_*.html
+debug_*.png
 debug_page.html
 debug_screenshot.png
+test_curl_cffi_output.html
+mobile_de_search_page.html
+src/debug_*.html
+src/debug_*.png
+src/import_cars/scrapers/mobile_de_html_full.txt
+*.log
 
 # IDE / Editor specific
 .vscode/
 .idea/
 *.swp
 *.swo
+~$*
 
 # Local outputs / scratch data
 exports/

@@ -1,3 +1,0 @@
-[console_scripts]
-import-cars = import_cars.cli:app
-import-cars-web = import_cars.webapp:main
