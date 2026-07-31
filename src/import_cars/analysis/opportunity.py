@@ -37,7 +37,7 @@ def _preferred_break_even(
     )
 
 
-def _match_level(target: NormalizedListing, candidate: NormalizedListing) -> str | None:
+def match_level(target: NormalizedListing, candidate: NormalizedListing) -> str | None:
     if build_market_key(target) != build_market_key(candidate):
         return None
 
@@ -134,7 +134,7 @@ def apply_opportunity_analysis(
         near = []
         broad = []
         for item in market_buckets.get(listing.market_key, []):
-            level = _match_level(listing, item)
+            level = match_level(listing, item)
             if level == "exact":
                 exact.append(item)
             elif level == "near":
