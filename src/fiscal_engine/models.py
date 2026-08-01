@@ -15,7 +15,6 @@ from datetime import date
 from enum import Enum
 from typing import Optional
 
-
 # --------------------------------------------------------------------------- #
 #  Enumeraciones de dominio
 # --------------------------------------------------------------------------- #
@@ -56,6 +55,17 @@ class Origen(str, Enum):
     EXTRA_UE = "extra_ue"
 
 
+class TipoCarroceria(str, Enum):
+    """Categorías operativas para estimar el transporte profesional."""
+
+    TURISMO = "turismo"
+    FAMILIAR = "familiar"
+    SUV = "suv"
+    MONOVOLUMEN = "monovolumen"
+    DEPORTIVO_GAMA_ALTA = "deportivo_gama_alta"
+    OTRO = "otro"
+
+
 # --------------------------------------------------------------------------- #
 #  Entrada
 # --------------------------------------------------------------------------- #
@@ -85,6 +95,8 @@ class Vehiculo:
     valor_tablas_nuevo: Optional[float] = None
     # Confianza del dato de CO2: 1.0 original, <1 inferido. Solo informativo.
     co2_confianza: float = 1.0
+    # Solo determina el tramo de transporte; nunca altera una fórmula fiscal.
+    carroceria: Optional[TipoCarroceria] = None
 
 
 @dataclass
@@ -104,7 +116,14 @@ class Operacion:
 class CostesConfig:
     """Costes operativos parametrizables (no impuestos)."""
     honorarios_gestion: float = 900.0        # tarifa fija visible al cliente
-    transporte: float = 550.0                # camión / conducción
+    # Un valor explícito prevalece sobre los tramos (presupuesto cerrado/test).
+    transporte: Optional[float] = None
+    transporte_turismo: float = 950.0
+    transporte_suv_monovolumen: float = 1100.0
+    transporte_deportivo_gama_alta: float = 1200.0
+    # Reservados para incorporar distancia sin cambiar el contrato del motor.
+    transporte_origen: Optional[str] = None
+    transporte_destino: Optional[str] = None
     itv_importacion: float = 140.0
     tasa_dgt: float = 99.77                   # tasa 1.1 matriculación turismo 2026
     placas: float = 35.0

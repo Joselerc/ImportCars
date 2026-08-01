@@ -50,6 +50,7 @@ async def test_public_result_uses_engine_and_never_exposes_internal_metrics(
             co2_gkm=148,
             mileage_km=40_000,
             power_kw=125,
+            body_type="deportivo_gama_alta",
             seller_type="particular",
             autonomous_community="Madrid",
             municipality="Madrid",
@@ -69,6 +70,9 @@ async def test_public_result_uses_engine_and_never_exposes_internal_metrics(
     assert result.spanish_market_price_eur == 42_000
     assert result.savings_eur == pytest.approx(42_000 - result.final_price_eur, abs=0.01)
     assert any(row["key"] == "honorarios" for row in result.breakdown)
+    transport = next(row for row in result.breakdown if row["key"] == "transporte")
+    assert transport["amount_eur"] == 1_200
+    assert "deportivo" in transport["note"]
 
 
 def test_public_input_requires_displacement_for_combustion_vehicle() -> None:

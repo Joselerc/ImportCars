@@ -42,6 +42,7 @@ async def test_public_page_and_calculation_do_not_require_internal_auth(
         page = await client.get("/calculadora")
         assert page.status_code == 200
         assert "Cuánto te cuesta" in page.text
+        assert 'id="m_body"' in page.text
 
         response = await client.post(
             "/api/public/calculate",
@@ -103,6 +104,7 @@ async def test_public_url_parser_returns_editable_fields(monkeypatch) -> None:
         co2_original_g_km=162,
         seller=Seller(type="dealer"),
         vat_deductible=True,
+        body_type="SUV / Off-road",
     )
     monkeypatch.setattr(webapp, "parse_listing_url", lambda url: listing)
     transport = httpx.ASGITransport(app=webapp.app)
@@ -118,6 +120,7 @@ async def test_public_url_parser_returns_editable_fields(monkeypatch) -> None:
     assert payload["model"] == "X5"
     assert payload["version"] == "xDrive30d"
     assert payload["seller_type"] == "profesional_iva"
+    assert payload["body_type"] == "suv"
     assert payload["missing_fields"] == []
 
 

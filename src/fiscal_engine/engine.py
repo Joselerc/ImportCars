@@ -18,8 +18,10 @@ Las fórmulas implementan:
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import date
 
+from . import tablas as T
 from .models import (
     CondicionFiscal,
     CostesConfig,
@@ -27,13 +29,10 @@ from .models import (
     Operacion,
     Origen,
     ResultadoFiscal,
-    TipoComprador,
+    TipoCarroceria,
     TipoVendedor,
     Vehiculo,
-    Combustible,
 )
-from . import tablas as T
-
 
 # --------------------------------------------------------------------------- #
 #  Antigüedad y depreciación
@@ -227,6 +226,32 @@ def calcular_ivtm_primer_anio(vehiculo: Vehiculo, operacion: Operacion,
 #  Cálculo completo — CLIENTE FINAL
 # --------------------------------------------------------------------------- #
 
+
+def estimar_coste_transporte(vehiculo: Vehiculo, costes: CostesConfig) -> float:
+    """Resolve el transporte operativo por carrocería, sin tocar impuestos."""
+
+    if costes.transporte is not None:
+        return costes.transporte
+    if vehiculo.carroceria in {TipoCarroceria.SUV, TipoCarroceria.MONOVOLUMEN}:
+        return costes.transporte_suv_monovolumen
+    if vehiculo.carroceria == TipoCarroceria.DEPORTIVO_GAMA_ALTA:
+        return costes.transporte_deportivo_gama_alta
+    return costes.transporte_turismo
+
+
+def _nota_transporte(vehiculo: Vehiculo, costes: CostesConfig) -> str:
+    if costes.transporte is not None:
+        return "Importe de transporte configurado para esta operación"
+    if vehiculo.carroceria in {TipoCarroceria.SUV, TipoCarroceria.MONOVOLUMEN}:
+        return "Estimación para SUV o monovolumen"
+    if vehiculo.carroceria == TipoCarroceria.DEPORTIVO_GAMA_ALTA:
+        return "Estimación para deportivo o gama alta"
+    if vehiculo.carroceria == TipoCarroceria.FAMILIAR:
+        return "Estimación para vehículo familiar"
+    if vehiculo.carroceria == TipoCarroceria.TURISMO:
+        return "Estimación para turismo estándar"
+    return "Estimación conservadora cuando la carrocería no está confirmada"
+
 def calcular(vehiculo: Vehiculo,
              operacion: Operacion,
              costes: CostesConfig | None = None,
@@ -240,6 +265,7 @@ def calcular(vehiculo: Vehiculo,
     """
     costes = costes or CostesConfig()
     avisos: list[str] = []
+    transporte = estimar_coste_transporte(vehiculo, costes)
 
     vm = valor_mercado(vehiculo, referencia, uso_profesional)
     if vehiculo.valor_tablas_nuevo is None:
@@ -277,8 +303,8 @@ def calcular(vehiculo: Vehiculo,
     # Costes extra-UE (aduana).
     otros = costes.coc + costes.traduccion_jurada
     if operacion.origen == Origen.EXTRA_UE:
-        arancel = costes.arancel_pct * (vehiculo.precio_compra + costes.transporte)
-        iva_import = T.IVA_ESPANA * (vehiculo.precio_compra + costes.transporte + arancel)
+        arancel = costes.arancel_pct * (vehiculo.precio_compra + transporte)
+        iva_import = T.IVA_ESPANA * (vehiculo.precio_compra + transporte + arancel)
         otros += arancel + iva_import + costes.gestion_aduanera
         avisos.append(
             "Origen fuera de la UE: incluye arancel (10%), IVA de importación "
@@ -287,7 +313,7 @@ def calcular(vehiculo: Vehiculo,
 
     coste = (
         vehiculo.precio_compra
-        + costes.transporte
+        + transporte
         + iedmt + itp + iva + ivtm
         + costes.itv_importacion + costes.tasa_dgt + costes.placas
         + costes.honorarios_gestion
@@ -295,7 +321,7 @@ def calcular(vehiculo: Vehiculo,
     )
 
     desglose = _construir_desglose(
-        vehiculo, operacion, costes, iedmt, tipo_iedmt, itp, tipo_itp,
+        vehiculo, operacion, costes, transporte, iedmt, tipo_iedmt, itp, tipo_itp,
         iva, ivtm, otros,
     )
 
@@ -303,7 +329,7 @@ def calcular(vehiculo: Vehiculo,
         base_iedmt=base_iedmt, tipo_iedmt=tipo_iedmt, iedmt=iedmt,
         base_itp=base_itp, tipo_itp=tipo_itp, itp=itp,
         iva=iva, ivtm_primer_anio=ivtm,
-        transporte=costes.transporte, itv=costes.itv_importacion,
+        transporte=transporte, itv=costes.itv_importacion,
         tasa_dgt=costes.tasa_dgt, placas=costes.placas,
         honorarios_gestion=costes.honorarios_gestion, otros_costes=otros,
         coste_cliente_final=coste, desglose_cliente=desglose,
@@ -336,11 +362,16 @@ def _aviso_frontera_co2(co2: float | None, avisos: list[str]) -> None:
             break
 
 
-def _construir_desglose(vehiculo, operacion, costes, iedmt, tipo_iedmt,
+def _construir_desglose(vehiculo, operacion, costes, transporte, iedmt, tipo_iedmt,
                         itp, tipo_itp, iva, ivtm, otros) -> list[LineaCoste]:
     lineas = [
         LineaCoste("precio", "Precio del coche", vehiculo.precio_compra),
-        LineaCoste("transporte", "Transporte a España", costes.transporte),
+        LineaCoste(
+            "transporte",
+            "Transporte profesional a España",
+            transporte,
+            nota=_nota_transporte(vehiculo, costes),
+        ),
         LineaCoste(
             "iedmt", "Impuesto de matriculación (IEDMT)", iedmt,
             nota=(f"{vehiculo.co2_gkm:.0f} g/km CO2 -> {tipo_iedmt*100:.2f}%"
@@ -389,15 +420,7 @@ def break_even_compraventa(vehiculo: Vehiculo,
     """
     costes = costes or CostesConfig()
     # En modo dealer no hay honorarios de gestión al cliente.
-    costes_dealer = CostesConfig(
-        honorarios_gestion=0.0,
-        transporte=costes.transporte,
-        itv_importacion=costes.itv_importacion,
-        tasa_dgt=costes.tasa_dgt,
-        placas=costes.placas,
-        coc=costes.coc,
-        traduccion_jurada=costes.traduccion_jurada,
-    )
+    costes_dealer = replace(costes, honorarios_gestion=0.0)
     r = calcular(vehiculo, operacion, costes_dealer, referencia=referencia)
     return {
         "break_even": r.coste_cliente_final,   # sin honorarios => coste de reventa

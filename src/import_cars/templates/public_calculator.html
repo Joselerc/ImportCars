@@ -374,8 +374,11 @@ footer{border-top:1px solid var(--line);padding:40px 0;margin-top:40px}
             <div class="field"><label for="m_cc">Cilindrada <span class="opt">(cc)</span></label><input id="m_cc" type="number" min="0" value="1984"></div>
             <div class="field"><label for="m_kw">Potencia <span class="opt">(kW)</span></label><input id="m_kw" type="number" min="0" value="180"></div>
           </div>
-          <div class="grid-3" style="margin-top:16px">
+          <div class="grid" style="margin-top:16px">
             <div class="field"><label for="m_km">Kilómetros</label><input id="m_km" type="number" min="0" value="60000"></div>
+            <div class="field"><label for="m_body">Carrocería</label><select id="m_body"><option value="">No lo sé</option><option value="turismo" selected>Turismo</option><option value="familiar">Familiar</option><option value="suv">SUV</option><option value="monovolumen">Monovolumen</option><option value="deportivo_gama_alta">Deportivo o gama alta</option><option value="otro">Otra</option></select></div>
+          </div>
+          <div class="grid" style="margin-top:16px">
             <div class="field"><label for="m_seller">Vendedor</label><select id="m_seller"><option value="particular">Particular</option><option value="profesional_iva">Profesional · IVA desglosado</option><option value="profesional_margen">Profesional · IVA no desglosado</option></select></div>
             <div class="field"><label for="m_prov">Tu provincia</label><select id="m_prov"><option value="Madrid|Madrid">Madrid</option><option value="Cataluna|Barcelona">Barcelona</option><option value="Comunidad Valenciana|Valencia">Valencia</option><option value="Andalucia|Sevilla">Sevilla</option><option value="Galicia|A Coruna">Galicia (A Coruña)</option></select></div>
           </div>

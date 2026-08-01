@@ -7,12 +7,14 @@ from datetime import date
 from fiscal_engine import (
     Combustible,
     Operacion,
+    TipoCarroceria,
     TipoComprador,
     TipoVendedor,
     Vehiculo,
     break_even_compraventa,
 )
 
+from ..enrichment.body_type import normalize_body_type
 from ..enrichment.signature import normalize_fuel_category
 from ..fiscal_data import resolver_registro_valor_tablas
 from ..models import NormalizedListing
@@ -94,6 +96,7 @@ def vehicle_from_listing(listing: NormalizedListing) -> Vehiculo:
     confidence = listing.co2_confidence
     if confidence is None:
         confidence = 1.0 if listing.co2_original_g_km is not None else 0.0
+    body_type = normalize_body_type(listing.body_type)
 
     return Vehiculo(
         marca=listing.make,
@@ -108,6 +111,7 @@ def vehicle_from_listing(listing: NormalizedListing) -> Vehiculo:
         cvf=resolution.fiscal_hp if resolution else None,
         valor_tablas_nuevo=resolution.value_eur if resolution else None,
         co2_confianza=confidence,
+        carroceria=TipoCarroceria(body_type) if body_type else None,
     )
 
 

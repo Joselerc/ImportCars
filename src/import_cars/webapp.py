@@ -19,6 +19,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, HttpUrl, model_validator
 
+from .enrichment.body_type import normalize_body_type
 from .enrichment.signature import normalize_fuel_category
 from .services import (
     ListingParseError,
@@ -670,6 +671,7 @@ def _parsed_listing_payload(listing) -> dict:
         "co2_gkm": _co2_value(listing.model_dump()),
         "mileage_km": listing.mileage_km,
         "power_kw": listing.power_kw,
+        "body_type": normalize_body_type(listing.body_type),
         "seller_type": seller_type,
         "vat_deductible": listing.vat_deductible,
         "co2_confirmed": listing.co2_original_g_km is not None,

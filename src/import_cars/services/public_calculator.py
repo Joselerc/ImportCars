@@ -12,6 +12,7 @@ from fiscal_engine import (
     Combustible,
     CostesConfig,
     Operacion,
+    TipoCarroceria,
     TipoVendedor,
     Vehiculo,
     calcular,
@@ -33,6 +34,14 @@ class PublicCalculationInput(BaseModel):
     co2_gkm: float | None = Field(None, ge=0, le=1_000)
     mileage_km: int | None = Field(None, ge=0, le=5_000_000)
     power_kw: float | None = Field(None, ge=0, le=2_000)
+    body_type: Literal[
+        "turismo",
+        "familiar",
+        "suv",
+        "monovolumen",
+        "deportivo_gama_alta",
+        "otro",
+    ] | None = None
     cvf: float | None = Field(None, ge=0, le=200)
     seller_type: Literal["particular", "profesional_iva", "profesional_margen"]
     autonomous_community: str = Field(min_length=1, max_length=80)
@@ -100,6 +109,7 @@ def _market_target(data: PublicCalculationInput) -> NormalizedListing:
         power_kw=int(data.power_kw) if data.power_kw is not None else None,
         power_hp=round(data.power_kw * 1.35962) if data.power_kw is not None else None,
         engine_displacement_cc=data.displacement_cc,
+        body_type=data.body_type,
         co2_original_g_km=round(data.co2_gkm) if data.co2_gkm is not None else None,
         co2_confidence=1.0 if data.co2_confirmed else 0.5 if data.co2_gkm is not None else 0.0,
         seller=Seller(type="private" if data.seller_type == "particular" else "dealer"),
@@ -144,6 +154,7 @@ async def calculate_for_customer(
         cvf=data.cvf if data.cvf is not None else resolution.fiscal_hp if resolution else None,
         valor_tablas_nuevo=resolution.value_eur if resolution else None,
         co2_confianza=1.0 if data.co2_confirmed else 0.5 if data.co2_gkm is not None else 0.0,
+        carroceria=TipoCarroceria(data.body_type) if data.body_type else None,
     )
     market_price = market.median_eur if market else None
     fees = float(os.getenv("IMPORT_CARS_MANAGEMENT_FEE", "900"))

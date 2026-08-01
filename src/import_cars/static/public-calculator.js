@@ -51,6 +51,7 @@
     displacement_cc: "la cilindrada",
     mileage_km: "los kilómetros",
     power_kw: "la potencia",
+    body_type: "la carrocería",
     seller_type: "el tipo de vendedor",
   };
 
@@ -119,6 +120,7 @@
       co2_gkm: numeric("m_co2"),
       mileage_km: numeric("m_km"),
       power_kw: numeric("m_kw"),
+      body_type: byId("m_body").value || null,
       seller_type: byId("m_seller").value,
       autonomous_community: location.autonomousCommunity,
       municipality: location.municipality,
@@ -138,11 +140,13 @@
       m_co2: listing.co2_gkm,
       m_km: listing.mileage_km,
       m_kw: listing.power_kw,
+      m_body: listing.body_type,
       m_seller: listing.seller_type,
     };
     Object.entries(values).forEach(([id, value]) => {
       if (value !== null && value !== undefined && byId(id)) byId(id).value = value;
     });
+    byId("m_body").value = listing.body_type || "";
     byId("m_co2_confirmed").checked = Boolean(listing.co2_confirmed);
     byId("m_prov").value = byId("u_prov").value;
   };

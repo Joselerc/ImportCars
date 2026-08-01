@@ -11,50 +11,54 @@ Dos superficies sobre el mismo cálculo:
 - break_even_compraventa(...) -> dict            (dealer / opportunity finder)
 """
 
-from .models import (
-    Vehiculo,
-    Operacion,
-    CostesConfig,
-    ResultadoFiscal,
-    LineaCoste,
-    Combustible,
-    TipoVendedor,
-    TipoComprador,
-    CondicionFiscal,
-    Origen,
-)
-from .engine import (
-    calcular,
-    break_even_compraventa,
-    valor_mercado,
-    coeficiente_depreciacion,
-    tipo_iedmt_estatal,
-    base_imponible_iedmt,
-    condicion_fiscal,
-    potencia_fiscal_cvf,
-)
 from . import tablas
+from .engine import (
+    base_imponible_iedmt,
+    break_even_compraventa,
+    calcular,
+    coeficiente_depreciacion,
+    condicion_fiscal,
+    estimar_coste_transporte,
+    potencia_fiscal_cvf,
+    tipo_iedmt_estatal,
+    valor_mercado,
+)
+from .models import (
+    Combustible,
+    CondicionFiscal,
+    CostesConfig,
+    LineaCoste,
+    Operacion,
+    Origen,
+    ResultadoFiscal,
+    TipoCarroceria,
+    TipoComprador,
+    TipoVendedor,
+    Vehiculo,
+)
 
 __all__ = [
-    "calcular",
-    "break_even_compraventa",
-    "valor_mercado",
-    "coeficiente_depreciacion",
-    "tipo_iedmt_estatal",
-    "base_imponible_iedmt",
-    "condicion_fiscal",
-    "potencia_fiscal_cvf",
-    "Vehiculo",
-    "Operacion",
-    "CostesConfig",
-    "ResultadoFiscal",
-    "LineaCoste",
     "Combustible",
-    "TipoVendedor",
-    "TipoComprador",
     "CondicionFiscal",
+    "CostesConfig",
+    "LineaCoste",
+    "Operacion",
     "Origen",
+    "ResultadoFiscal",
+    "TipoCarroceria",
+    "TipoComprador",
+    "TipoVendedor",
+    "Vehiculo",
+    "base_imponible_iedmt",
+    "break_even_compraventa",
+    "calcular",
+    "coeficiente_depreciacion",
+    "condicion_fiscal",
+    "estimar_coste_transporte",
+    "potencia_fiscal_cvf",
     "tablas",
+    "tipo_iedmt_estatal",
+    "valor_mercado",
 ]
 
 __version__ = "1.0.0"

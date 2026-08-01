@@ -243,6 +243,9 @@ orden y su huella SHA-256, y reemplaza atómicamente solo esa misma versión.
 La ruta `/calculadora` acepta un enlace de mobile.de/AutoScout24 o los datos
 manuales. Consulta coches.net bajo demanda, aplica el motor fiscal y muestra
 únicamente precio final, ahorro, desglose, honorarios y avisos para el cliente.
+El transporte profesional se estima por carrocería: 950 € para turismo, familiar
+o tipo desconocido; 1.100 € para SUV/monovolumen; y 1.200 € para deportivo o
+gama alta declarada. La marca nunca determina el tramo.
 
 ```bash
 import-cars-web

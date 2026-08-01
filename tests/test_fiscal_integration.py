@@ -27,6 +27,7 @@ def _listing() -> NormalizedListing:
         engine_displacement_cc=1368,
         co2_original_g_km=148,
         co2_confidence=1.0,
+        body_type="SUV / Off-road",
     )
 
 
@@ -42,6 +43,7 @@ def test_listing_adapter_resolves_the_official_boe_value(
     assert vehicle.valor_tablas_nuevo == 33_400
     assert vehicle.cvf == 10.61
     assert vehicle.fecha_primera_matriculacion.isoformat() == "2018-05-01"
+    assert vehicle.carroceria.value == "suv"
 
 
 def test_internal_scenarios_use_fiscal_engine_without_client_fees(
