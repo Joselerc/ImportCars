@@ -36,7 +36,7 @@ async def test_public_result_uses_engine_and_never_exposes_internal_metrics(
 ) -> None:
     database = tmp_path / "fiscal.sqlite3"
     install_boe_dataset(database, parse_boe_xml(FIXTURE.read_bytes()))
-    monkeypatch.setenv("IMPORT_CARS_DATABASE_PATH", str(database))
+    monkeypatch.setenv("IMPORT_CARS_FISCAL_DATABASE_PATH", str(database))
 
     result = await calculate_for_customer(
         PublicCalculationInput(

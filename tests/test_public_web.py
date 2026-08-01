@@ -32,7 +32,7 @@ async def test_public_page_and_calculation_do_not_require_internal_auth(
 ) -> None:
     database = tmp_path / "fiscal.sqlite3"
     install_boe_dataset(database, parse_boe_xml(FIXTURE.read_bytes()))
-    monkeypatch.setenv("IMPORT_CARS_DATABASE_PATH", str(database))
+    monkeypatch.setenv("IMPORT_CARS_FISCAL_DATABASE_PATH", str(database))
     monkeypatch.setenv("IMPORT_CARS_INTERNAL_USERNAME", "operator")
     monkeypatch.setenv("IMPORT_CARS_INTERNAL_PASSWORD", "secret")
     monkeypatch.setattr(webapp, "market_reference_service", MarketStub())
@@ -65,6 +65,20 @@ async def test_public_page_and_calculation_do_not_require_internal_auth(
 
     assert response.status_code == 200
     payload = response.json()
+    assert set(payload) == {
+        "vehicle_label",
+        "final_price_eur",
+        "spanish_market_price_eur",
+        "savings_eur",
+        "savings_pct",
+        "market_sample_size",
+        "market_confidence",
+        "market_cached",
+        "breakdown",
+        "warnings",
+        "fiscal_version",
+        "boe_model_match",
+    }
     assert payload["boe_model_match"] == "124 1.4 Spider"
     assert payload["spanish_market_price_eur"] == 42_000
     assert "break_even" not in response.text
@@ -110,7 +124,7 @@ async def test_public_url_parser_returns_editable_fields(monkeypatch) -> None:
 @pytest.mark.asyncio
 async def test_public_lead_endpoint_persists_consent(tmp_path: Path, monkeypatch) -> None:
     database = tmp_path / "local.sqlite3"
-    monkeypatch.setenv("IMPORT_CARS_DATABASE_PATH", str(database))
+    monkeypatch.setenv("IMPORT_CARS_CUSTOMER_DATABASE_PATH", str(database))
     transport = httpx.ASGITransport(app=webapp.app)
 
     async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:

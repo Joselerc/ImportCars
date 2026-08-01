@@ -250,8 +250,10 @@ import-cars-web
 ```
 
 Las solicitudes de presupuesto con consentimiento se guardan en la tabla
-`public_leads` de la misma SQLite local. El dashboard interno conserva su
-autenticación Basic de forma independiente.
+`public_leads` de la SQLite de actividad de clientes. Las fuentes del BOE y el
+seguimiento periódico de mercado usan bases físicamente separadas; consulta
+`docs/architecture/persistence-boundaries.md`. El dashboard interno conserva
+su autenticación Basic de forma independiente.
 
 ## 📈 Estadísticas del Proyecto
 

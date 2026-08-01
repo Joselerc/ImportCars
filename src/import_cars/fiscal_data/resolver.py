@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 import re
 import sqlite3
 import unicodedata
@@ -11,7 +10,9 @@ from datetime import date
 from difflib import SequenceMatcher
 from pathlib import Path
 
-DEFAULT_DATABASE_PATH = Path(__file__).resolve().parents[3] / "data" / "import_cars.sqlite3"
+from ..persistence.paths import DEFAULT_FISCAL_DATABASE_PATH, fiscal_database_path
+
+DEFAULT_DATABASE_PATH = DEFAULT_FISCAL_DATABASE_PATH
 
 _BRAND_ALIASES = {
     "VW": "VOLKSWAGEN",
@@ -48,8 +49,7 @@ def _normalize(value: str) -> str:
 def _database_path(database_path: str | Path | None) -> Path:
     if database_path is not None:
         return Path(database_path)
-    configured = os.getenv("IMPORT_CARS_DATABASE_PATH")
-    return Path(configured) if configured else DEFAULT_DATABASE_PATH
+    return fiscal_database_path()
 
 
 def _similarity(

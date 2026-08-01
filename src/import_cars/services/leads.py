@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 import re
 import sqlite3
 from datetime import UTC, datetime
@@ -11,7 +10,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, HttpUrl, field_validator
 
-from ..fiscal_data import DEFAULT_DATABASE_PATH
+from ..persistence import customer_database_path
 
 
 class PublicLeadInput(BaseModel):
@@ -46,11 +45,7 @@ def save_public_lead(
 ) -> None:
     """Store a consented contact request in the local SQLite v1 database."""
 
-    path = Path(
-        database_path
-        or os.getenv("IMPORT_CARS_DATABASE_PATH")
-        or DEFAULT_DATABASE_PATH
-    )
+    path = Path(database_path) if database_path is not None else customer_database_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     with sqlite3.connect(path) as connection, connection:
         connection.execute(

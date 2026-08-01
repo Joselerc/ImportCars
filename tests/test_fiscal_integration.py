@@ -35,7 +35,7 @@ def test_listing_adapter_resolves_the_official_boe_value(
 ) -> None:
     database = tmp_path / "fiscal.sqlite3"
     install_boe_dataset(database, parse_boe_xml(FIXTURE.read_bytes()))
-    monkeypatch.setenv("IMPORT_CARS_DATABASE_PATH", str(database))
+    monkeypatch.setenv("IMPORT_CARS_FISCAL_DATABASE_PATH", str(database))
 
     vehicle = vehicle_from_listing(_listing())
 
@@ -49,7 +49,7 @@ def test_internal_scenarios_use_fiscal_engine_without_client_fees(
 ) -> None:
     database = tmp_path / "fiscal.sqlite3"
     install_boe_dataset(database, parse_boe_xml(FIXTURE.read_bytes()))
-    monkeypatch.setenv("IMPORT_CARS_DATABASE_PATH", str(database))
+    monkeypatch.setenv("IMPORT_CARS_FISCAL_DATABASE_PATH", str(database))
 
     scenarios = break_even_scenarios(_listing())
 
