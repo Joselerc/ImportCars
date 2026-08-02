@@ -77,6 +77,8 @@ def test_resolves_an_unambiguous_official_value(tmp_path: Path) -> None:
         2018,
         displacement_cc=1368,
         power_kw=125,
+        fuel_code="G",
+        cylinders=4,
         database_path=database,
     )
 
@@ -85,7 +87,9 @@ def test_resolves_an_unambiguous_official_value(tmp_path: Path) -> None:
     assert match.order_code == "HAC/1501/2025"
     assert match.value_eur == 33_400
     assert resolver_valor_tablas(
-        "Abarth", "124 1.4 Spider", 2018, database_path=database
+        "Abarth", "124 1.4 Spider", 2018,
+        displacement_cc=1368, power_kw=125, fuel_code="G", cylinders=4,
+        database_path=database
     ) == 33_400
 
 
@@ -109,6 +113,8 @@ def test_resolver_never_crosses_to_a_different_model(tmp_path: Path) -> None:
             2018,
             displacement_cc=1368,
             power_kw=125,
+            fuel_code="G",
+            cylinders=4,
             database_path=database,
         )
         is None

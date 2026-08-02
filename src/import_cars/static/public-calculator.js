@@ -29,6 +29,7 @@
 
   let latestCalculation = null;
   let latestSourceUrl = null;
+  let selectedBoeRowId = null;
 
   const breakdownHelp = {
     precio: "Es el precio publicado por el vendedor en Alemania, antes de transporte e impuestos españoles.",
@@ -49,6 +50,7 @@
     purchase_price: "el precio",
     fuel: "el combustible",
     displacement_cc: "la cilindrada",
+    cylinders: "el número de cilindros",
     mileage_km: "los kilómetros",
     power_kw: "la potencia",
     body_type: "la carrocería",
@@ -110,7 +112,7 @@
 
   const manualPayload = () => {
     const location = province("m_prov");
-    return {
+    const payload = {
       make: byId("m_make").value.trim(),
       model: byId("m_model").value.trim(),
       version: byId("m_version").value.trim() || null,
@@ -118,6 +120,7 @@
       purchase_price: numeric("m_price"),
       fuel: byId("m_fuel").value,
       displacement_cc: numeric("m_cc"),
+      cylinders: numeric("m_cylinders"),
       co2_gkm: numeric("m_co2"),
       mileage_km: numeric("m_km"),
       power_kw: numeric("m_kw"),
@@ -128,6 +131,10 @@
       municipality: location.municipality,
       co2_confirmed: byId("m_co2_confirmed").checked,
     };
+    if (config.auditMode && selectedBoeRowId !== null) {
+      payload.boe_row_id_override = selectedBoeRowId;
+    }
+    return payload;
   };
 
   const fillManual = (listing) => {
@@ -139,6 +146,7 @@
       m_price: listing.purchase_price,
       m_fuel: listing.fuel,
       m_cc: listing.displacement_cc,
+      m_cylinders: listing.cylinders,
       m_co2: listing.co2_gkm,
       m_km: listing.mileage_km,
       m_kw: listing.power_kw,
@@ -147,7 +155,7 @@
       m_seller: listing.seller_type,
     };
     Object.entries(values).forEach(([id, value]) => {
-      if (value !== null && value !== undefined && byId(id)) byId(id).value = value;
+      if (byId(id)) byId(id).value = value ?? "";
     });
     byId("m_body").value = listing.body_type || "";
     byId("m_co2_confirmed").checked = Boolean(listing.co2_confirmed);
@@ -339,6 +347,61 @@
     });
   };
 
+  const renderAuditBoe = (boe) => {
+    const panel = byId("audit-boe");
+    if (!panel || !boe) return;
+    panel.hidden = false;
+    const summary = byId("audit-boe-summary");
+    summary.replaceChildren();
+    [
+      ["Modelo + año", String(boe.base_candidate_count || 0)],
+      ["Filtro técnico", String(boe.technical_candidate_count || 0)],
+      ["Tras cambio", String(boe.transmission_candidate_count || 0)],
+      ["Confianza", boe.confidence === "non_conclusive" ? "No concluyente" : boe.confidence === "manual" ? "Confirmación manual" : boe.confidence === "high" ? "Alta" : "Sin resolver"],
+    ].forEach(([label, value]) => {
+      const card = document.createElement("div");
+      card.className = "audit-stat";
+      addTextElement(card, "span", "", label);
+      addTextElement(card, "strong", "", value);
+      summary.appendChild(card);
+    });
+    byId("audit-boe-query").textContent = `Consulta: ${boe.brand || "—"} · ${boe.query || "—"} · ${boe.year || "—"}${boe.price_spread_pct === null ? "" : ` · dispersión ${boe.price_spread_pct}%`}`;
+    const warning = byId("audit-boe-warning");
+    warning.textContent = boe.warning || "";
+    warning.hidden = !boe.warning;
+    const container = byId("audit-boe-candidates");
+    container.replaceChildren();
+    if (!(boe.candidates || []).length) {
+      addTextElement(container, "p", "audit-intro", "No hay filas que superen todos los filtros técnicos obligatorios.");
+      return;
+    }
+    (boe.candidates || []).forEach((candidate) => {
+      const card = document.createElement("article");
+      card.className = `boe-candidate${candidate.selected ? " selected" : ""}`;
+      const head = document.createElement("div");
+      head.className = "boe-candidate-head";
+      const title = document.createElement("div");
+      addTextElement(title, "strong", "", `Fila ${candidate.row_id} · ${candidate.model_type}`);
+      addTextElement(title, "small", "", candidate.selected ? "Fila aplicada al cálculo" : "Candidata técnica");
+      head.appendChild(title);
+      addTextElement(head, "span", "", money(candidate.value_eur));
+      card.appendChild(head);
+      addTextElement(card, "div", "boe-candidate-meta", `Periodo ${candidate.commercial_start ?? "—"}–${candidate.commercial_end ?? "—"} · ${candidate.displacement_cc} cc · ${candidate.cylinders} cil. · ${candidate.fuel_code} · ${candidate.power_kw} kW / ${candidate.power_cv} CV · ${candidate.transmission_kind} · similitud ${candidate.text_score}`);
+      addTextElement(card, "div", "boe-candidate-decision", candidate.decision);
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "boe-select";
+      button.disabled = candidate.selected;
+      button.textContent = candidate.selected ? "Fila aplicada" : "Usar esta fila y recalcular";
+      button.addEventListener("click", () => {
+        selectedBoeRowId = candidate.row_id;
+        calculate(button);
+      });
+      card.appendChild(button);
+      container.appendChild(card);
+    });
+  };
+
   const render = (data) => {
     latestCalculation = data;
     byId("r_car").textContent = data.vehicle_label;
@@ -392,8 +455,15 @@
       item.textContent = warning;
       riskList.appendChild(item);
     });
+    riskBox.classList.toggle(
+      "critical",
+      (data.warnings || []).some((warning) => warning.startsWith("ATENCIÓN"))
+    );
     riskBox.hidden = !data.warnings || data.warnings.length === 0;
-    if (config.auditMode) renderAuditMarket(data.audit?.market);
+    if (config.auditMode) {
+      renderAuditBoe(data.audit?.boe);
+      renderAuditMarket(data.audit?.market);
+    }
 
     const whatsapp = byId("whatsapp-link");
     const message = encodeURIComponent(
@@ -432,6 +502,12 @@
     calculate(event.currentTarget);
   });
 
+  document.querySelectorAll("#pane-manual input, #pane-manual select").forEach((field) => {
+    field.addEventListener("change", () => {
+      selectedBoeRowId = null;
+    });
+  });
+
   byId("url-submit").addEventListener("click", async (event) => {
     event.preventDefault();
     const url = byId("urlInput").value.trim();
@@ -451,6 +527,7 @@
       const listing = await response.json();
       if (!response.ok) throw new Error(detailMessage(listing, "No se pudo leer el anuncio."));
       latestSourceUrl = listing.source_url;
+      selectedBoeRowId = null;
       fillManual(listing);
       switchPane("manual");
       if (listing.missing_fields.length) {

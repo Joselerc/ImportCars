@@ -109,6 +109,7 @@ def calculation_input() -> PublicCalculationInput:
         purchase_price=25_000,
         fuel="gasolina",
         displacement_cc=1368,
+        cylinders=4,
         co2_gkm=148,
         mileage_km=40_000,
         power_kw=125,
@@ -139,6 +140,8 @@ async def test_audit_result_exposes_real_fiscal_trace_and_frozen_comparables(
     assert result.audit.market["maximum_eur"] == 39_900
     assert result.audit.market["comparables"][0]["mileage_km"] == 52_000
     assert result.audit.market["comparables"][0]["transmission"] == "manual"
+    assert result.audit.boe["technical_candidate_count"] == 1
+    assert result.audit.boe["candidates"][0]["selected"] is True
     assert "pocos comparables" in result.audit.market["quality_warning"]
 
     fiscal = {line.key: line for line in result.audit.fiscal_breakdown}

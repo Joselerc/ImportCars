@@ -242,6 +242,15 @@ nav{
 .audit-stat{background:#22272e;border:1px solid #343b44;border-radius:10px;padding:14px}
 .audit-stat span{display:block;color:#9099a4;font-size:11px;margin-bottom:4px}.audit-stat strong{font-family:'Space Mono';font-size:15px}
 .audit-warning{padding:12px 14px;border:1px solid #806326;background:#2d281c;color:#f1c971;border-radius:9px;font-size:13px;margin-bottom:18px}
+.boe-query{font-family:'Space Mono';font-size:12px;color:#c7cdd4;margin-bottom:15px}
+.boe-candidate{border:1px solid #343b44;border-radius:10px;background:#1d2228;padding:16px 17px;margin-top:10px}
+.boe-candidate.selected{border-color:var(--amber);box-shadow:inset 3px 0 0 var(--amber)}
+.boe-candidate-head{display:flex;justify-content:space-between;gap:18px;align-items:flex-start}
+.boe-candidate-head strong{display:block}.boe-candidate-head span{font-family:'Space Mono';color:#f1b14f;white-space:nowrap}
+.boe-candidate-meta{color:#aeb5bd;font-size:12px;line-height:1.7;margin-top:9px}
+.boe-candidate-decision{font-size:12.5px;color:#eef0f2;margin-top:8px}
+.boe-select{margin-top:12px;padding:8px 12px;border:1px solid #78602d;border-radius:7px;background:#2d281c;color:#f1c971;cursor:pointer;font:600 12px 'Inter'}
+.boe-select:disabled{cursor:default;opacity:.65}
 .audit-panel details{border:1px solid #343b44;border-radius:10px;background:#1d2228;margin-top:10px;overflow:hidden}
 .audit-panel details>summary{list-style:none;cursor:pointer;padding:15px 17px;display:flex;justify-content:space-between;align-items:center;gap:16px}
 .audit-panel details>summary::-webkit-details-marker{display:none}
@@ -330,6 +339,7 @@ footer{border-top:1px solid var(--line);padding:40px 0;margin-top:40px}
 .calc-status{margin-top:12px;font-size:13px;color:var(--muted);min-height:20px}
 .calc-status.error{color:#9f2d20}.calc-status.ok{color:var(--amber-deep)}
 .risk-box{margin-top:22px;padding:20px;border:1px solid #ead9bf;background:#fff9ef;border-radius:var(--radius)}
+.risk-box.critical{border:2px solid #bd790d;background:#fff2d6;box-shadow:0 10px 30px rgba(189,121,13,.12)}
 .risk-box h3{margin:0 0 10px}.risk-list{margin:0;padding-left:20px;color:var(--muted);line-height:1.6}
 .lead-form{display:grid;grid-template-columns:1fr 1fr auto;gap:10px;margin-top:16px;width:100%}
 .case.validation{grid-column:1/-1;display:grid;grid-template-columns:minmax(220px,.7fr) 1.3fr}
@@ -413,13 +423,16 @@ footer{border-top:1px solid var(--line);padding:40px 0;margin-top:40px}
             <div class="field"><label for="m_cc">Cilindrada <span class="opt">(cc)</span></label><input id="m_cc" type="number" min="0" value="1984"></div>
             <div class="field"><label for="m_kw">Potencia <span class="opt">(kW)</span></label><input id="m_kw" type="number" min="0" value="180"></div>
           </div>
-          <div class="{{ 'grid-3' if audit_mode else 'grid' }}" style="margin-top:16px">
+          <div class="grid-3" style="margin-top:16px">
+            <div class="field"><label for="m_cylinders">Cilindros</label><input id="m_cylinders" type="number" min="1" max="24" value="4"></div>
+            <div class="field"><label for="m_transmission">Cambio</label><select id="m_transmission"><option value="">No consta</option><option value="manual">Manual</option><option value="automatic">Automático</option><option value="semi_automatic">Semiautomático</option></select></div>
             <div class="field"><label for="m_km">Kilómetros</label><input id="m_km" type="number" min="0" value="60000"></div>
-            <div class="field"><label for="m_body">Carrocería</label><select id="m_body"><option value="">No lo sé</option><option value="turismo" selected>Turismo</option><option value="familiar">Familiar</option><option value="suv">SUV</option><option value="monovolumen">Monovolumen</option><option value="deportivo_gama_alta">Deportivo o gama alta</option><option value="otro">Otra</option></select></div>
-            {% if audit_mode %}<div class="field"><label for="m_transmission">Cambio <span class="opt">(para observar; aún no filtra)</span></label><select id="m_transmission"><option value="">No consta</option><option value="manual">Manual</option><option value="automatic">Automático</option><option value="semi_automatic">Semiautomático</option></select></div>{% endif %}
           </div>
           <div class="grid" style="margin-top:16px">
+            <div class="field"><label for="m_body">Carrocería</label><select id="m_body"><option value="">No lo sé</option><option value="turismo" selected>Turismo</option><option value="familiar">Familiar</option><option value="suv">SUV</option><option value="monovolumen">Monovolumen</option><option value="deportivo_gama_alta">Deportivo o gama alta</option><option value="otro">Otra</option></select></div>
             <div class="field"><label for="m_seller">Vendedor</label><select id="m_seller"><option value="particular">Particular</option><option value="profesional_iva">Profesional · IVA desglosado</option><option value="profesional_margen">Profesional · IVA no desglosado</option></select></div>
+          </div>
+          <div class="grid" style="margin-top:16px">
             <div class="field"><label for="m_prov">Tu provincia</label><select id="m_prov"><option value="Madrid|Madrid">Madrid</option><option value="Cataluna|Barcelona">Barcelona</option><option value="Comunidad Valenciana|Valencia">Valencia</option><option value="Andalucia|Sevilla">Sevilla</option><option value="Galicia|A Coruna">Galicia (A Coruña)</option></select></div>
           </div>
           <label class="url-hint" style="margin-top:14px"><input id="m_co2_confirmed" type="checkbox"> El CO₂ está confirmado en el anuncio o en el CoC</label>
@@ -469,6 +482,14 @@ footer{border-top:1px solid var(--line);padding:40px 0;margin-top:40px}
       </div>
 
       {% if audit_mode %}
+      <section class="audit-panel" id="audit-boe" aria-label="Auditoría de identificación BOE" hidden>
+        <h3>Identificación en las tablas del BOE</h3>
+        <p class="audit-intro">Embudo técnico, desempate y selección de la fila oficial usada por el motor fiscal.</p>
+        <div class="audit-summary" id="audit-boe-summary"></div>
+        <div class="audit-warning" id="audit-boe-warning" hidden></div>
+        <div class="boe-query" id="audit-boe-query"></div>
+        <div id="audit-boe-candidates"></div>
+      </section>
       <section class="audit-panel" id="audit-market" aria-label="Auditoría de comparables" hidden>
         <h3>Auditoría de la referencia española</h3>
         <p class="audit-intro">Fotografía exacta de los anuncios que produjeron el precio de mercado. Esta vista describe la política actual; no la modifica.</p>

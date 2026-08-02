@@ -18,7 +18,7 @@ from fiscal_engine import (
     calcular,
 )
 
-from ..fiscal_data import resolver_registro_valor_tablas
+from ..fiscal_data import resolver_diagnostico_valor_tablas
 from ..models import NormalizedListing, Registration, Seller
 from .market_reference import SpanishMarketReferenceService
 
@@ -31,6 +31,7 @@ class PublicCalculationInput(BaseModel):
     purchase_price: float = Field(gt=0, le=5_000_000)
     fuel: Literal["gasolina", "diesel", "electrico", "hibrido", "phev", "glp", "otro"]
     displacement_cc: int = Field(ge=0, le=20_000)
+    cylinders: int | None = Field(None, ge=1, le=24)
     co2_gkm: float | None = Field(None, ge=0, le=1_000)
     mileage_km: int | None = Field(None, ge=0, le=5_000_000)
     power_kw: float | None = Field(None, ge=0, le=2_000)
@@ -71,6 +72,11 @@ class PublicCalculationResult(BaseModel):
     warnings: list[str]
     fiscal_version: str
     boe_model_match: str | None
+    boe_confidence: str
+
+
+class AuditCalculationInput(PublicCalculationInput):
+    boe_row_id_override: int | None = Field(None, ge=1)
 
 
 class FiscalAuditLine(BaseModel):
@@ -83,6 +89,7 @@ class FiscalAuditLine(BaseModel):
 
 class CalculationAudit(BaseModel):
     market: dict
+    boe: dict
     fiscal_breakdown: list[FiscalAuditLine]
 
 
@@ -106,6 +113,16 @@ _SELLER_MAP = {
     "profesional_margen": TipoVendedor.PROFESIONAL_MARGEN,
 }
 
+_BOE_FUEL_CODES = {
+    "gasolina": "G",
+    "diesel": "D",
+    "electrico": "Elc",
+    "hibrido": "H",
+    "phev": "H",
+    "glp": "GLP",
+    "otro": "Otro",
+}
+
 
 def _market_target(data: PublicCalculationInput) -> NormalizedListing:
     return NormalizedListing(
@@ -127,6 +144,7 @@ def _market_target(data: PublicCalculationInput) -> NormalizedListing:
         power_kw=int(data.power_kw) if data.power_kw is not None else None,
         power_hp=round(data.power_kw * 1.35962) if data.power_kw is not None else None,
         engine_displacement_cc=data.displacement_cc,
+        cylinders=data.cylinders,
         body_type=data.body_type,
         transmission=data.transmission,
         co2_original_g_km=round(data.co2_gkm) if data.co2_gkm is not None else None,
@@ -140,6 +158,7 @@ async def _calculate(
     *,
     market_service: SpanishMarketReferenceService,
     include_audit: bool,
+    selected_boe_row_id: int | None = None,
 ) -> PublicCalculationResult | AuditCalculationResult:
     """Return only customer-facing totals, explanations and risk warnings."""
 
@@ -154,13 +173,18 @@ async def _calculate(
             "El coste fiscal si esta calculado; reintenta para obtener el ahorro."
         )
 
-    resolution = resolver_registro_valor_tablas(
+    boe_audit = resolver_diagnostico_valor_tablas(
         data.make,
         " ".join(filter(None, [data.model, data.version])),
         data.first_registration,
         displacement_cc=data.displacement_cc,
         power_kw=data.power_kw,
+        fuel_code=_BOE_FUEL_CODES[data.fuel],
+        cylinders=data.cylinders,
+        transmission=data.transmission,
+        selected_row_id=selected_boe_row_id,
     )
+    resolution = boe_audit.resolution
     vehicle = Vehiculo(
         marca=data.make,
         modelo=" ".join(filter(None, [data.model, data.version])),
@@ -194,6 +218,14 @@ async def _calculate(
     )
 
     warnings = list(result.avisos)
+    if boe_audit.warning:
+        warnings.append(boe_audit.warning)
+    if resolution is None:
+        warnings.append(
+            "ATENCIÓN: no se ha encontrado ninguna fila técnicamente compatible en el BOE. "
+            "El valor como nuevo se ha estimado desde el precio del anuncio; confirma la "
+            "versión antes de usar este cálculo en un presupuesto formal."
+        )
     if data.mileage_km is None:
         warnings.append(
             "El anuncio no aporta kilometraje. Confírmalo: por debajo de 6.000 km "
@@ -246,6 +278,7 @@ async def _calculate(
         warnings=warnings,
         fiscal_version=result.version_tablas,
         boe_model_match=resolution.model_type if resolution else None,
+        boe_confidence=boe_audit.confidence_label,
     )
     if not include_audit:
         return public_result
@@ -276,6 +309,40 @@ async def _calculate(
                     comparable.model_dump(mode="json")
                     for comparable in market.comparables
                 ] if market else [],
+            },
+            boe={
+                "query": boe_audit.query,
+                "brand": boe_audit.normalized_brand,
+                "year": boe_audit.year,
+                "base_candidate_count": boe_audit.base_candidate_count,
+                "technical_candidate_count": boe_audit.technical_candidate_count,
+                "transmission_candidate_count": boe_audit.transmission_candidate_count,
+                "confidence": boe_audit.confidence_label,
+                "price_spread_pct": boe_audit.price_spread_pct,
+                "warning": boe_audit.warning,
+                "missing_technical_fields": list(boe_audit.missing_technical_fields),
+                "selected_row_id": resolution.row_id if resolution else None,
+                "candidates": [
+                    {
+                        "row_id": candidate.row_id,
+                        "model_type": candidate.model_type,
+                        "value_eur": candidate.value_eur,
+                        "commercial_start": candidate.commercial_start,
+                        "commercial_end": candidate.commercial_end,
+                        "displacement_cc": candidate.displacement_cc,
+                        "cylinders": candidate.cylinders,
+                        "fuel_code": candidate.fuel_code,
+                        "power_kw": candidate.power_kw,
+                        "power_cv": candidate.power_cv,
+                        "fiscal_hp": candidate.fiscal_hp,
+                        "text_score": candidate.text_score,
+                        "transmission_kind": candidate.transmission_kind,
+                        "transmission_compatible": candidate.transmission_compatible,
+                        "selected": candidate.selected,
+                        "decision": candidate.decision,
+                    }
+                    for candidate in boe_audit.candidates
+                ],
             },
             fiscal_breakdown=[
                 FiscalAuditLine(
@@ -315,7 +382,7 @@ async def calculate_for_customer(
 
 
 async def calculate_for_audit(
-    data: PublicCalculationInput,
+    data: AuditCalculationInput,
     *,
     market_service: SpanishMarketReferenceService,
 ) -> AuditCalculationResult:
@@ -323,12 +390,14 @@ async def calculate_for_audit(
         data,
         market_service=market_service,
         include_audit=True,
+        selected_boe_row_id=getattr(data, "boe_row_id_override", None),
     )
     assert isinstance(result, AuditCalculationResult)
     return result
 
 
 __all__ = [
+    "AuditCalculationInput",
     "AuditCalculationResult",
     "PublicCalculationInput",
     "PublicCalculationResult",

@@ -54,9 +54,11 @@ async def test_public_page_and_calculation_do_not_require_internal_auth(
                 "purchase_price": 25_000,
                 "fuel": "gasolina",
                 "displacement_cc": 1368,
+                "cylinders": 4,
                 "co2_gkm": 148,
                 "mileage_km": 40_000,
                 "power_kw": 125,
+                "transmission": "manual",
                 "seller_type": "particular",
                 "autonomous_community": "Madrid",
                 "municipality": "Madrid",
@@ -79,6 +81,7 @@ async def test_public_page_and_calculation_do_not_require_internal_auth(
         "warnings",
         "fiscal_version",
         "boe_model_match",
+        "boe_confidence",
     }
     assert payload["boe_model_match"] == "124 1.4 Spider"
     assert payload["spanish_market_price_eur"] == 42_000
@@ -100,6 +103,7 @@ async def test_public_url_parser_returns_editable_fields(monkeypatch) -> None:
         first_registration=Registration(year=2020, month=5),
         fuel_type="diesel",
         engine_displacement_cc=2993,
+        cylinders=6,
         power_kw=195,
         co2_original_g_km=162,
         seller=Seller(type="dealer"),

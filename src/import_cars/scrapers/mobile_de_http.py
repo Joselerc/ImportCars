@@ -314,7 +314,7 @@ class MobileDeHttpScraper:
             title=payload.get("title"),
             make=make.get("localized"),
             model=model.get("localized"),
-            version=attributes.get("trimLine") or payload.get("subTitle"),
+            version=payload.get("subTitle") or attributes.get("trimLine"),
             price_eur=float(price_eur) if price_eur is not None else None,
             price_net_eur=float(net.get("amount")) if net.get("amount") is not None else None,
             price_original=(
@@ -330,17 +330,31 @@ class MobileDeHttpScraper:
             power_hp=power_hp,
             power_kw=power_kw,
             engine_displacement_cc=self._localized_integer(attributes.get("cubicCapacity")),
+            cylinders=self._localized_integer(attributes.get("cylinder")),
             body_type=attributes.get("category"),
+            doors=self._localized_integer(attributes.get("doorCount")),
+            seats=self._localized_integer(attributes.get("numSeats")),
             color_exterior=attributes.get("color"),
             emission_class=attributes.get("emissionClass"),
             co2_emissions_g_km=co2,
             co2_original_g_km=co2,
             co2_source_type="listing" if co2 is not None else None,
             co2_confidence=1.0 if co2 is not None else 0.0,
+            features=list(payload.get("features") or []),
             images=image_urls,
             seller=seller,
             previous_owners=self._localized_integer(attributes.get("numberOfPreviousOwners")),
-            metadata=ListingMetadata(vehicle_id=vehicle_id),
+            metadata=ListingMetadata(
+                vehicle_id=vehicle_id,
+                hsn_tsn=(
+                    f"{payload['kba'].get('hsn')}/{payload['kba'].get('tsn')}"
+                    if payload.get("kba")
+                    and payload["kba"].get("hsn")
+                    and payload["kba"].get("tsn")
+                    else None
+                ),
+                source_trim_line=attributes.get("trimLine"),
+            ),
         )
 
     def _extract_summary_listings(

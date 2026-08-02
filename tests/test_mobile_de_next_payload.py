@@ -65,13 +65,14 @@ def test_extracts_current_next_detail_payload() -> None:
         "id": 456794709,
         "title": "BMW X5 xDrive30d",
         "shortTitle": "BMW X5",
-        "subTitle": "xDrive30d",
+        "subTitle": "xDrive30d M SPORT/LEDER",
         "make": {"localized": "BMW"},
         "model": {"localized": "X5"},
         "price": {"grs": {"amount": 61900, "currency": "EUR"}},
         "contact": {"enumType": "DEALER", "name": "Autohaus"},
         "attributes": [
             {"tag": "trimLine", "value": "xDrive30d"},
+            {"tag": "cylinder", "value": "6"},
             {"tag": "mileage", "value": "89.000 km"},
             {"tag": "cubicCapacity", "value": "2.993 ccm"},
             {"tag": "power", "value": "210 kW (286 cv)"},
@@ -92,7 +93,9 @@ def test_extracts_current_next_detail_payload() -> None:
     assert result is not None
     assert result.make == "BMW"
     assert result.model == "X5"
-    assert result.version == "xDrive30d"
+    assert result.version == "xDrive30d M SPORT/LEDER"
+    assert result.metadata.source_trim_line == "xDrive30d"
+    assert result.cylinders == 6
     assert result.price_eur == 61_900
     assert result.first_registration.month == 10
     assert result.engine_displacement_cc == 2_993

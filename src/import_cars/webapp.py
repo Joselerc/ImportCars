@@ -22,6 +22,7 @@ from pydantic import BaseModel, HttpUrl, model_validator
 from .enrichment.body_type import normalize_body_type
 from .enrichment.signature import normalize_fuel_category, normalize_text
 from .services import (
+    AuditCalculationInput,
     ListingParseError,
     PublicCalculationInput,
     PublicLeadInput,
@@ -680,6 +681,7 @@ def _parsed_listing_payload(listing) -> dict:
         "purchase_price": listing.price_eur,
         "fuel": fuel_map.get(fuel, "otro"),
         "displacement_cc": listing.engine_displacement_cc,
+        "cylinders": listing.cylinders,
         "co2_gkm": _co2_value(listing.model_dump()),
         "mileage_km": listing.mileage_km,
         "power_kw": listing.power_kw,
@@ -695,6 +697,8 @@ def _parsed_listing_payload(listing) -> dict:
         "first_registration",
         "purchase_price",
         "displacement_cc",
+        "cylinders",
+        "power_kw",
     )
     payload["missing_fields"] = [field for field in required if not payload[field]]
     return payload
@@ -863,7 +867,7 @@ async def public_calculator_api(
 
 @app.post("/api/internal/calculate-audit")
 async def audit_calculator_api(
-    request: PublicCalculationInput,
+    request: AuditCalculationInput,
     _access: None = Depends(_require_internal_access),
     _rate_limit: None = Depends(calculator_rate_limit),
 ) -> dict:

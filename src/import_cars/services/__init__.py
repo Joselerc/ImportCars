@@ -3,6 +3,7 @@ from .leads import PublicLeadInput, save_public_lead
 from .listing_url_parser import ListingParseError, parse_listing_url
 from .market_reference import MarketReference, SpanishMarketReferenceService
 from .public_calculator import (
+    AuditCalculationInput,
     AuditCalculationResult,
     PublicCalculationInput,
     PublicCalculationResult,
@@ -11,6 +12,7 @@ from .public_calculator import (
 )
 
 __all__ = [
+    "AuditCalculationInput",
     "AuditCalculationResult",
     "FiscalInputError",
     "ListingParseError",

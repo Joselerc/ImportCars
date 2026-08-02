@@ -25,6 +25,8 @@ def _listing() -> NormalizedListing:
         fuel_type="gasoline",
         power_kw=125,
         engine_displacement_cc=1368,
+        cylinders=4,
+        transmission="manual",
         co2_original_g_km=148,
         co2_confidence=1.0,
         body_type="SUV / Off-road",

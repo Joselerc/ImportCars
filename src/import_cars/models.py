@@ -62,6 +62,7 @@ class ListingMetadata(BaseModel):
     exportable: bool | None = None
     # Dato observado en origen para auditoría; no participa en el matching.
     source_transmission: str | None = None
+    source_trim_line: str | None = None
 
 
 class NormalizedListing(BaseModel):
@@ -85,6 +86,7 @@ class NormalizedListing(BaseModel):
     power_hp: int | None = None
     power_kw: int | None = None
     engine_displacement_cc: int | None = None
+    cylinders: int | None = None
     body_type: str | None = None
     doors: int | None = None
     seats: int | None = None

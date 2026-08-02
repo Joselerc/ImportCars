@@ -76,12 +76,23 @@ def vehicle_from_listing(listing: NormalizedListing) -> Vehiculo:
         raise FiscalInputError("El anuncio no incluye modelo")
 
     registration_date = _registration_date(listing)
+    normalized_fuel = normalize_fuel_category(listing.fuel_type)
     resolution = resolver_registro_valor_tablas(
         listing.make,
         model,
         registration_date,
         displacement_cc=listing.engine_displacement_cc,
         power_kw=listing.power_kw,
+        fuel_code={
+            "gasoline": "G",
+            "diesel": "D",
+            "electric": "Elc",
+            "hybrid": "H",
+            "phev": "H",
+            "lpg": "GLP",
+        }.get(normalized_fuel),
+        cylinders=listing.cylinders,
+        transmission=listing.transmission,
     )
     displacement = listing.engine_displacement_cc or (
         resolution.displacement_cc if resolution else None
@@ -91,7 +102,7 @@ def vehicle_from_listing(listing: NormalizedListing) -> Vehiculo:
             "El anuncio no incluye cilindrada y no se pudo resolver en el BOE"
         )
 
-    fuel = _FUEL_MAP.get(normalize_fuel_category(listing.fuel_type), Combustible.OTRO)
+    fuel = _FUEL_MAP.get(normalized_fuel, Combustible.OTRO)
     co2 = _co2(listing)
     confidence = listing.co2_confidence
     if confidence is None:
