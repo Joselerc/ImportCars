@@ -175,6 +175,91 @@ async def test_public_url_parser_guides_missing_co2_without_learning_user_value(
 
 
 @pytest.mark.asyncio
+async def test_public_parser_preserves_net_price_and_unregistered_new_status(
+    monkeypatch,
+) -> None:
+    listing = NormalizedListing(
+        listing_id="460350611",
+        source="mobile_de",
+        url="https://www.mobile.de/details.html?id=460350611",
+        scraped_at=datetime.now(UTC),
+        make="Peugeot",
+        model="5008",
+        version="E-5008 GT Elektromotor 210",
+        price_eur=54_550,
+        price_net_eur=45_840.34,
+        vat_deductible=True,
+        unregistered_new=True,
+        fuel_type="Eléctrico",
+        engine_displacement_cc=None,
+        power_kw=157,
+        co2_emissions_g_km=0,
+        co2_original_g_km=0,
+        co2_source_type="listing",
+        body_type="SUV/Off-road/Pickup",
+        transmission="Automático",
+        seller=Seller(type="dealer"),
+    )
+    monkeypatch.setattr(webapp, "parse_listing_url", lambda url: listing)
+    transport = httpx.ASGITransport(app=webapp.app)
+
+    async with httpx.AsyncClient(
+        transport=transport, base_url="http://testserver"
+    ) as client:
+        response = await client.post(
+            "/api/public/parse-listing",
+            json={"url": "https://www.mobile.de/details.html?id=460350611"},
+        )
+
+    payload = response.json()
+    assert response.status_code == 200
+    assert payload["purchase_price"] == 54_550
+    assert payload["purchase_price_net"] == 45_840.34
+    assert payload["vat_deductible"] is True
+    assert payload["unregistered_new"] is True
+    assert payload["first_registration"] is None
+    assert payload["seller_type"] == "profesional_iva"
+    assert "first_registration" not in payload["missing_fields"]
+
+
+@pytest.mark.asyncio
+async def test_public_parser_treats_low_mileage_dealer_vehicle_as_new_vat(
+    monkeypatch,
+) -> None:
+    listing = NormalizedListing(
+        listing_id="new-by-mileage",
+        source="mobile_de",
+        url="https://www.mobile.de/details.html?id=123456789",
+        scraped_at=datetime.now(UTC),
+        make="Volkswagen",
+        model="Golf",
+        version="1.5 TSI",
+        first_registration=Registration(year=2020, month=1),
+        mileage_km=5_999,
+        price_eur=23_800,
+        fuel_type="Gasolina",
+        engine_displacement_cc=1_498,
+        power_kw=110,
+        seller=Seller(type="dealer"),
+    )
+    monkeypatch.setattr(webapp, "parse_listing_url", lambda url: listing)
+    transport = httpx.ASGITransport(app=webapp.app)
+
+    async with httpx.AsyncClient(
+        transport=transport, base_url="http://testserver"
+    ) as client:
+        response = await client.post(
+            "/api/public/parse-listing",
+            json={"url": "https://www.mobile.de/details.html?id=123456789"},
+        )
+
+    payload = response.json()
+    assert response.status_code == 200
+    assert payload["vat_deductible"] is False
+    assert payload["seller_type"] == "profesional_iva"
+
+
+@pytest.mark.asyncio
 async def test_public_lead_endpoint_persists_consent(tmp_path: Path, monkeypatch) -> None:
     database = tmp_path / "local.sqlite3"
     monkeypatch.setenv("IMPORT_CARS_CUSTOMER_DATABASE_PATH", str(database))

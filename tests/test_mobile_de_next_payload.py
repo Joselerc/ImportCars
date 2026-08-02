@@ -70,7 +70,11 @@ def test_extracts_current_next_detail_payload() -> None:
         "subTitle": "xDrive30d M SPORT/LEDER",
         "make": {"localized": "BMW"},
         "model": {"localized": "X5"},
-        "price": {"grs": {"amount": 61900, "currency": "EUR"}},
+        "price": {
+            "grs": {"amount": 61900, "currency": "EUR"},
+            "nt": {"amount": 52016.81, "currency": "EUR"},
+            "vat": 19,
+        },
         "contact": {"enumType": "DEALER", "name": "Autohaus"},
         "attributes": [
             {"tag": "trimLine", "value": "xDrive30d"},
@@ -100,6 +104,8 @@ def test_extracts_current_next_detail_payload() -> None:
     assert result.metadata.source_trim_line == "xDrive30d"
     assert result.cylinders == 6
     assert result.price_eur == 61_900
+    assert result.price_net_eur == 52_016.81
+    assert result.vat_deductible is True
     assert result.first_registration.month == 10
     assert result.engine_displacement_cc == 2_993
     assert result.power_kw == 210
@@ -175,3 +181,21 @@ def test_electric_metadata_is_preserved_from_json() -> None:
     assert result.energy_source == "Electricidad"
     assert result.battery_info == "Batería comprada"
     assert result.battery_capacity_kwh == 73.5
+
+
+def test_unregistered_new_condition_is_preserved_from_json() -> None:
+    result = MobileDeHttpScraper()._extract_next_detail_listing(
+        _electric_detail_html(
+            "460350611",
+            [
+                {"tag": "damageCondition", "value": "Nuevo, Sin accidentes"},
+                {"tag": "envkv.engineType", "value": "Motor eléctrico"},
+            ],
+        ),
+        "460350611",
+        "https://www.mobile.de/details.html?id=460350611",
+    )
+
+    assert result is not None
+    assert result.first_registration is None
+    assert result.unregistered_new is True

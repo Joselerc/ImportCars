@@ -292,7 +292,9 @@ def test_vehiculo_nuevo_por_meses_paga_iva():
         marca="VW",
         modelo="ID.3",
         fecha_primera_matriculacion=date(2026, 5, 1),  # 2 meses antes de REF
-        precio_compra=30000,
+        precio_compra=35700,
+        precio_neto=30000,
+        iva_aleman_desglosable=True,
         combustible=Combustible.ELECTRICO,
         cilindrada_cc=0,
         co2_gkm=0,
@@ -306,6 +308,8 @@ def test_vehiculo_nuevo_por_meses_paga_iva():
     r = calcular(v, op, referencia=REF)
     assert r.condicion_fiscal == CondicionFiscal.NUEVO
     assert r.iva == pytest.approx(0.21 * 30000, rel=1e-6)
+    assert r.base_iva == 30000
+    assert r.origen_base_iva == "neto_anuncio"
 
 
 def test_vehiculo_nuevo_por_km():
@@ -322,6 +326,207 @@ def test_vehiculo_nuevo_por_km():
         valor_tablas_nuevo=32000,
     )
     assert condicion_fiscal(v, REF) == CondicionFiscal.NUEVO
+
+
+def test_exactly_six_months_and_6000_km_is_used() -> None:
+    vehicle = Vehiculo(
+        marca="Volkswagen",
+        modelo="Golf",
+        fecha_primera_matriculacion=date(2026, 1, 1),
+        precio_compra=25_000,
+        combustible=Combustible.GASOLINA,
+        cilindrada_cc=1498,
+        kilometros=6_000,
+    )
+
+    assert condicion_fiscal(vehicle, date(2026, 6, 30)) == CondicionFiscal.NUEVO
+    assert condicion_fiscal(vehicle, date(2026, 7, 1)) == CondicionFiscal.USADO
+
+
+def _used_vat_vehicle() -> Vehiculo:
+    return Vehiculo(
+        marca="Volkswagen",
+        modelo="Golf 1.5 TSI",
+        fecha_primera_matriculacion=date(2017, 11, 1),
+        precio_compra=15_990,
+        precio_neto=13_436.97,
+        iva_aleman_desglosable=True,
+        combustible=Combustible.GASOLINA,
+        cilindrada_cc=1498,
+        co2_gkm=130,
+        kilometros=109_800,
+        valor_tablas_nuevo=30_000,
+    )
+
+
+def test_used_particular_never_pays_spanish_vat_regression() -> None:
+    result = calcular(
+        _used_vat_vehicle(),
+        Operacion(tipo_vendedor=TipoVendedor.PARTICULAR),
+        referencia=REF,
+    )
+
+    assert result.condicion_fiscal == CondicionFiscal.USADO
+    assert result.iva == 0
+    assert result.itp > 0
+    assert result.caso_iva == "usado_particular"
+    assert result.precio_adquisicion == 15_990
+    assert result.coste_cliente_final == pytest.approx(19_043.37819085487)
+
+
+def test_used_professional_with_itemized_vat_has_no_spanish_vat() -> None:
+    result = calcular(
+        _used_vat_vehicle(),
+        Operacion(tipo_vendedor=TipoVendedor.PROFESIONAL_IVA),
+        referencia=REF,
+    )
+
+    assert result.iva == 0
+    assert result.itp == 0
+    assert result.caso_iva == "usado_profesional_iva"
+    assert result.precio_adquisicion == 15_990
+    assert result.coste_cliente_final == pytest.approx(18_403.77819085487)
+
+
+def test_used_margin_scheme_has_no_spanish_vat() -> None:
+    vehicle = _used_vat_vehicle()
+    vehicle.precio_neto = None
+    vehicle.iva_aleman_desglosable = False
+
+    result = calcular(
+        vehicle,
+        Operacion(tipo_vendedor=TipoVendedor.PROFESIONAL_MARGEN),
+        referencia=REF,
+    )
+
+    assert result.iva == 0
+    assert result.itp == 0
+    assert result.caso_iva == "usado_profesional_margen"
+    assert result.precio_adquisicion == 15_990
+    assert result.coste_cliente_final == pytest.approx(18_403.77819085487)
+
+
+def test_new_vehicle_uses_advertised_net_price_before_any_calculation() -> None:
+    vehicle = Vehiculo(
+        marca="Peugeot",
+        modelo="E-5008 GT",
+        fecha_primera_matriculacion=REF,
+        precio_compra=54_550,
+        precio_neto=45_840.34,
+        iva_aleman_desglosable=True,
+        nuevo_sin_matricular=True,
+        combustible=Combustible.ELECTRICO,
+        cilindrada_cc=0,
+        co2_gkm=0,
+        kilometros=16,
+        valor_tablas_nuevo=41_100,
+    )
+
+    result = calcular(
+        vehicle,
+        Operacion(tipo_vendedor=TipoVendedor.PROFESIONAL_IVA),
+        referencia=REF,
+    )
+
+    assert result.base_iva == 45_840.34
+    assert result.origen_base_iva == "neto_anuncio"
+    assert result.iva == pytest.approx(45_840.34 * 0.21)
+
+
+def test_new_professional_gross_price_derives_net_by_dividing_1_19() -> None:
+    vehicle = Vehiculo(
+        marca="Volkswagen",
+        modelo="ID.3",
+        fecha_primera_matriculacion=REF,
+        precio_compra=37_890,
+        iva_aleman_desglosable=True,
+        nuevo_sin_matricular=True,
+        combustible=Combustible.ELECTRICO,
+        cilindrada_cc=0,
+        co2_gkm=0,
+        kilometros=10,
+        valor_tablas_nuevo=38_000,
+    )
+
+    result = calcular(
+        vehicle,
+        Operacion(tipo_vendedor=TipoVendedor.PROFESIONAL_IVA),
+        referencia=REF,
+    )
+
+    assert result.base_iva == pytest.approx(37_890 / 1.19)
+    assert result.origen_base_iva == "bruto_dividido_1_19"
+    assert result.iva == pytest.approx((37_890 / 1.19) * 0.21)
+
+
+@pytest.mark.parametrize(
+    "seller_type",
+    [TipoVendedor.PARTICULAR, TipoVendedor.PROFESIONAL_MARGEN],
+)
+def test_new_without_deductible_german_vat_uses_untouched_price(
+    seller_type: TipoVendedor,
+) -> None:
+    vehicle = Vehiculo(
+        marca="Volkswagen",
+        modelo="ID.3",
+        fecha_primera_matriculacion=REF,
+        precio_compra=30_000,
+        nuevo_sin_matricular=True,
+        combustible=Combustible.ELECTRICO,
+        cilindrada_cc=0,
+        co2_gkm=0,
+        kilometros=10,
+        valor_tablas_nuevo=38_000,
+    )
+
+    result = calcular(
+        vehicle,
+        Operacion(tipo_vendedor=seller_type),
+        referencia=REF,
+    )
+
+    assert result.base_iva == 30_000
+    assert result.origen_base_iva == "precio_sin_iva_desglosable"
+    assert result.iva == 6_300
+    assert result.itp == 0
+
+
+def test_roi_company_uses_net_purchase_and_zero_net_vat_cost() -> None:
+    vehicle = Vehiculo(
+        marca="Peugeot",
+        modelo="E-5008 GT",
+        fecha_primera_matriculacion=REF,
+        precio_compra=54_550,
+        precio_neto=45_840.34,
+        iva_aleman_desglosable=True,
+        nuevo_sin_matricular=True,
+        combustible=Combustible.ELECTRICO,
+        cilindrada_cc=0,
+        co2_gkm=0,
+        kilometros=16,
+        valor_tablas_nuevo=41_100,
+    )
+
+    result = calcular(
+        vehicle,
+        Operacion(
+            tipo_vendedor=TipoVendedor.PROFESIONAL_IVA,
+            tipo_comprador=TipoComprador.EMPRESA_ROI,
+        ),
+        referencia=REF,
+    )
+
+    assert result.caso_iva == "empresa_roi"
+    assert result.iva == 0
+    assert result.base_iva == 45_840.34
+    assert result.precio_adquisicion == 45_840.34
+
+
+def test_unregistered_vehicle_marked_new_is_new_without_registration_age() -> None:
+    vehicle = _used_vat_vehicle()
+    vehicle.nuevo_sin_matricular = True
+
+    assert condicion_fiscal(vehicle, REF) == CondicionFiscal.NUEVO
 
 
 # --------------------------------------------------------------------------- #

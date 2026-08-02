@@ -79,6 +79,7 @@ IVA_HISTORICO = [
 ]
 IVA_HISTORICO_ACTUAL = 0.21  # desde 2012-09-01
 IVA_ESPANA = 0.21
+IVA_ALEMANIA = 0.19
 
 
 # --------------------------------------------------------------------------- #

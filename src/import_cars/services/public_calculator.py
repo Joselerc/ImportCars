@@ -13,6 +13,7 @@ from fiscal_engine import (
     CostesConfig,
     Operacion,
     TipoCarroceria,
+    TipoComprador,
     TipoVendedor,
     Vehiculo,
     calcular,
@@ -27,8 +28,11 @@ class PublicCalculationInput(BaseModel):
     make: str = Field(min_length=1, max_length=80)
     model: str = Field(min_length=1, max_length=160)
     version: str | None = Field(None, max_length=160)
-    first_registration: date
+    first_registration: date | None = None
     purchase_price: float = Field(gt=0, le=5_000_000)
+    purchase_price_net: float | None = Field(None, gt=0, le=5_000_000)
+    vat_deductible: bool = False
+    unregistered_new: bool = False
     fuel: Literal["gasolina", "diesel", "electrico", "hibrido", "phev", "glp", "otro"]
     displacement_cc: int = Field(ge=0, le=20_000)
     cylinders: int | None = Field(None, ge=1, le=24)
@@ -46,6 +50,7 @@ class PublicCalculationInput(BaseModel):
     transmission: Literal["manual", "automatic", "semi_automatic"] | None = None
     cvf: float | None = Field(None, ge=0, le=200)
     seller_type: Literal["particular", "profesional_iva", "profesional_margen"]
+    buyer_type: Literal["particular", "empresa_roi"] = "particular"
     autonomous_community: str = Field(min_length=1, max_length=80)
     municipality: str = Field(min_length=1, max_length=120)
     co2_confirmed: bool = False
@@ -55,7 +60,14 @@ class PublicCalculationInput(BaseModel):
 
     @model_validator(mode="after")
     def validate_vehicle(self):
-        if self.first_registration > datetime.now(UTC).date():
+        if self.first_registration is None and not self.unregistered_new:
+            raise ValueError(
+                "La primera matriculacion es obligatoria salvo vehículo nuevo sin matricular"
+            )
+        if (
+            self.first_registration is not None
+            and self.first_registration > datetime.now(UTC).date()
+        ):
             raise ValueError("La primera matriculacion no puede estar en el futuro")
         if self.fuel != "electrico" and self.displacement_cc == 0:
             raise ValueError("La cilindrada es obligatoria para vehiculos no electricos")
@@ -93,6 +105,7 @@ class FiscalAuditLine(BaseModel):
 class CalculationAudit(BaseModel):
     market: dict
     boe: dict
+    vat: dict
     fiscal_breakdown: list[FiscalAuditLine]
 
 
@@ -114,6 +127,11 @@ _SELLER_MAP = {
     "particular": TipoVendedor.PARTICULAR,
     "profesional_iva": TipoVendedor.PROFESIONAL_IVA,
     "profesional_margen": TipoVendedor.PROFESIONAL_MARGEN,
+}
+
+_BUYER_MAP = {
+    "particular": TipoComprador.PARTICULAR,
+    "empresa_roi": TipoComprador.EMPRESA_ROI,
 }
 
 _BOE_FUEL_CODES = {
@@ -159,10 +177,15 @@ def _market_target(data: PublicCalculationInput) -> NormalizedListing:
         title=" ".join(filter(None, [data.make, data.model, data.version])),
         price_eur=data.purchase_price,
         mileage_km=data.mileage_km,
-        first_registration=Registration(
-            year=data.first_registration.year,
-            month=data.first_registration.month,
+        first_registration=(
+            Registration(
+                year=data.first_registration.year,
+                month=data.first_registration.month,
+            )
+            if data.first_registration
+            else None
         ),
+        unregistered_new=data.unregistered_new,
         fuel_type=data.fuel,
         power_kw=int(data.power_kw) if data.power_kw is not None else None,
         power_hp=round(data.power_kw * 1.35962) if data.power_kw is not None else None,
@@ -187,6 +210,7 @@ async def _calculate(
     """Return only customer-facing totals, explanations and risk warnings."""
 
     target = _market_target(data)
+    fiscal_registration = data.first_registration or datetime.now(UTC).date()
     market = None
     market_warning = None
     try:
@@ -200,7 +224,7 @@ async def _calculate(
     boe_audit = resolver_diagnostico_valor_tablas(
         data.make,
         " ".join(filter(None, [data.model, data.version])),
-        data.first_registration,
+        fiscal_registration,
         displacement_cc=data.displacement_cc,
         power_kw=data.power_kw,
         fuel_code=_BOE_FUEL_CODES[data.fuel],
@@ -213,8 +237,11 @@ async def _calculate(
     vehicle = Vehiculo(
         marca=data.make,
         modelo=" ".join(filter(None, [data.model, data.version])),
-        fecha_primera_matriculacion=data.first_registration,
+        fecha_primera_matriculacion=fiscal_registration,
         precio_compra=data.purchase_price,
+        precio_neto=data.purchase_price_net,
+        iva_aleman_desglosable=data.vat_deductible,
+        nuevo_sin_matricular=data.unregistered_new,
         combustible=_FUEL_MAP[data.fuel],
         cilindrada_cc=data.displacement_cc,
         co2_gkm=effective_co2,
@@ -235,6 +262,7 @@ async def _calculate(
         vehicle,
         Operacion(
             tipo_vendedor=_SELLER_MAP[data.seller_type],
+            tipo_comprador=_BUYER_MAP[data.buyer_type],
             comunidad_autonoma=data.autonomous_community,
             municipio=data.municipality,
         ),
@@ -289,7 +317,7 @@ async def _calculate(
     public_result = PublicCalculationResult(
         vehicle_label=(
             f"{' '.join(filter(None, [data.make, data.model, data.version]))} "
-            f"· {data.first_registration.year}"
+            f"· {'nuevo sin matricular' if data.unregistered_new else fiscal_registration.year}"
         ),
         final_price_eur=round(result.coste_cliente_final, 2),
         spanish_market_price_eur=round(market_price, 2) if market_price is not None else None,
@@ -378,6 +406,20 @@ async def _calculate(
                     }
                     for candidate in boe_audit.candidates
                 ],
+            },
+            vat={
+                "case": result.caso_iva,
+                "reason": result.motivo_iva,
+                "fiscal_condition": result.condicion_fiscal.value,
+                "seller_type": data.seller_type,
+                "buyer_type": data.buyer_type,
+                "gross_price_eur": data.purchase_price,
+                "advertised_net_price_eur": data.purchase_price_net,
+                "vat_deductible": data.vat_deductible,
+                "tax_base_eur": result.base_iva,
+                "tax_base_source": result.origen_base_iva,
+                "spanish_vat_eur": result.iva,
+                "acquisition_price_eur": result.precio_adquisicion,
             },
             fiscal_breakdown=[
                 FiscalAuditLine(

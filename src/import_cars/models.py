@@ -115,6 +115,7 @@ class NormalizedListing(BaseModel):
     service_history: bool | None = None
     accident_free: bool | None = None
     damage_condition: str | None = None
+    unregistered_new: bool = False
     metadata: ListingMetadata = Field(default_factory=ListingMetadata)
     vehicle_signature: str | None = None
     variant_key: str | None = None

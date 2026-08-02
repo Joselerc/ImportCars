@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import UTC, date, datetime
 
 from fiscal_engine import (
     Combustible,
@@ -43,6 +43,8 @@ def _registration_date(listing: NormalizedListing) -> date:
         )
     if listing.production_year:
         return date(listing.production_year, 1, 1)
+    if listing.unregistered_new:
+        return datetime.now(UTC).date()
     raise FiscalInputError("El anuncio no incluye fecha de primera matriculacion")
 
 
@@ -114,6 +116,9 @@ def vehicle_from_listing(listing: NormalizedListing) -> Vehiculo:
         modelo=model,
         fecha_primera_matriculacion=registration_date,
         precio_compra=listing.price_eur,
+        precio_neto=listing.price_net_eur,
+        iva_aleman_desglosable=bool(listing.vat_deductible),
+        nuevo_sin_matricular=listing.unregistered_new,
         combustible=fuel,
         cilindrada_cc=displacement,
         co2_gkm=co2,

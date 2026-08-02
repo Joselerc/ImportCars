@@ -82,6 +82,13 @@ class Vehiculo:
     precio_compra: float                     # precio pactado en Alemania (€)
     combustible: Combustible
     cilindrada_cc: int                        # para potencia fiscal (CVF) e IVTM
+    # Precio neto publicado por el anuncio, si el vendedor desglosa IVA alemán.
+    # Nunca se infiere fuera del motor: el adaptador solo aporta datos observados.
+    precio_neto: Optional[float] = None
+    iva_aleman_desglosable: bool = False
+    # Un vehículo anunciado como nuevo y aún sin matricular es fiscalmente nuevo
+    # aunque mobile.de no pueda proporcionar una fecha de primera matriculación.
+    nuevo_sin_matricular: bool = False
     # Emisiones oficiales de CO2 en g/km (WLTP/NEDC según certifique el CoC).
     # None => no acreditado => tipo máximo de IEDMT (14,75%).
     co2_gkm: Optional[float] = None
@@ -179,7 +186,12 @@ class ResultadoFiscal:
     base_itp: float
     tipo_itp: float
     itp: float
-    iva: float                                # IVA español si aplica (nuevos / ROI)
+    iva: float                                # IVA español como coste neto
+    caso_iva: str
+    motivo_iva: str
+    base_iva: float
+    origen_base_iva: str
+    precio_adquisicion: float
     ivtm_primer_anio: float
     # --- Costes operativos ---
     transporte: float

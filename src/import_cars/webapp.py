@@ -7,7 +7,7 @@ import secrets
 import sys
 import time
 from collections import defaultdict, deque
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Annotated
 
@@ -18,6 +18,8 @@ from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, HttpUrl, model_validator
+
+from fiscal_engine import es_nuevo_fiscal
 
 from .enrichment.body_type import normalize_body_type
 from .enrichment.co2_enricher import Co2Enricher
@@ -665,11 +667,19 @@ def _parsed_listing_payload(listing) -> dict:
     }
     public_fuel = fuel_map.get(fuel, "otro")
     is_private = listing.seller and listing.seller.type == "private"
+    registration_date = (
+        date(registration.year, registration.month or 1, 1) if registration else None
+    )
+    fiscally_new = es_nuevo_fiscal(
+        registration_date,
+        listing.mileage_km,
+        nuevo_sin_matricular=listing.unregistered_new,
+    )
     seller_type = (
         "particular"
         if is_private
         else "profesional_iva"
-        if listing.vat_deductible
+        if listing.vat_deductible or fiscally_new
         else "profesional_margen"
     )
     payload = {
@@ -681,6 +691,9 @@ def _parsed_listing_payload(listing) -> dict:
         "version": listing.version,
         "first_registration": first_registration,
         "purchase_price": listing.price_eur,
+        "purchase_price_net": listing.price_net_eur,
+        "vat_deductible": bool(listing.vat_deductible),
+        "unregistered_new": listing.unregistered_new,
         "fuel": public_fuel,
         "displacement_cc": (
             0 if public_fuel == "electrico" else listing.engine_displacement_cc
@@ -692,7 +705,6 @@ def _parsed_listing_payload(listing) -> dict:
         "body_type": normalize_body_type(listing.body_type),
         "transmission": _normalized_transmission(listing.transmission),
         "seller_type": seller_type,
-        "vat_deductible": listing.vat_deductible,
         "co2_confirmed": listing.co2_original_g_km is not None,
         "co2_source": (
             listing.co2_source_type
@@ -717,6 +729,7 @@ def _parsed_listing_payload(listing) -> dict:
         for field in required
         if not payload[field]
         and not (field == "displacement_cc" and payload["fuel"] == "electrico")
+        and not (field == "first_registration" and payload["unregistered_new"])
     ]
     if payload["fuel"] != "electrico" and payload["co2_gkm"] is None:
         payload["missing_fields"].append("co2_gkm")

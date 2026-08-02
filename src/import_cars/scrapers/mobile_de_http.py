@@ -135,6 +135,16 @@ class MobileDeHttpScraper:
             return "Eléctrico"
         return None
 
+    @staticmethod
+    def _is_unregistered_new(
+        damage_condition: str | None,
+        registration: Registration | None,
+    ) -> bool:
+        if registration is not None or not damage_condition:
+            return False
+        normalized = damage_condition.casefold().strip()
+        return normalized.startswith(("nuevo", "neu", "new", "neuf"))
+
     def _session_for_current_thread(self):
         session = getattr(self._thread_local, "session", None)
         if session is None:
@@ -336,7 +346,7 @@ class MobileDeHttpScraper:
         }
         price = payload.get("price") or {}
         gross = price.get("grs") or price.get("gross") or {}
-        net = price.get("net") or {}
+        net = price.get("nt") or price.get("net") or {}
         price_eur = gross.get("amount")
         registration = None
         match = re.search(r"(\d{1,2})/(\d{4})", attributes.get("firstRegistration") or "")
@@ -398,7 +408,9 @@ class MobileDeHttpScraper:
                 if price_eur is not None
                 else None
             ),
-            vat_deductible=net.get("amount") is not None,
+            vat_deductible=(
+                net.get("amount") is not None or price.get("vat") is not None
+            ),
             mileage_km=self._localized_integer(attributes.get("mileage")),
             first_registration=registration,
             fuel_type=self._fuel_from_attributes(attributes),
@@ -428,6 +440,9 @@ class MobileDeHttpScraper:
             previous_owners=self._localized_integer(attributes.get("numberOfPreviousOwners")),
             accident_free=self._accident_free_from_condition(damage_condition),
             damage_condition=damage_condition,
+            unregistered_new=self._is_unregistered_new(
+                damage_condition, registration
+            ),
             metadata=ListingMetadata(
                 vehicle_id=vehicle_id,
                 hsn_tsn=(
@@ -466,7 +481,7 @@ class MobileDeHttpScraper:
             model_data = item.get("model") or {}
             price_data = item.get("price") or {}
             gross = price_data.get("grs") or price_data.get("gross") or {}
-            net = price_data.get("net") or {}
+            net = price_data.get("nt") or price_data.get("net") or {}
             price_eur = gross.get("amount") or self._localized_number(item.get("p"))
             price_net_eur = net.get("amount")
 
@@ -553,7 +568,11 @@ class MobileDeHttpScraper:
                     if price_eur is not None
                     else None
                 ),
-                vat_deductible=bool(price_net_eur) if price_eur is not None else None,
+                vat_deductible=(
+                    bool(price_net_eur) or price_data.get("vat") is not None
+                    if price_eur is not None
+                    else None
+                ),
                 mileage_km=self._localized_integer(attributes.get("ml")),
                 first_registration=registration,
                 fuel_type=attributes.get("ft"),
@@ -742,11 +761,9 @@ class MobileDeHttpScraper:
                 month, year = reg_match.groups()
                 registration = Registration(year=int(year), month=int(month))
 
-        # Precio neto (estimado)
+        # El fallback HTML no inventa un neto: si no está estructurado, el motor
+        # decidirá si procede calcular bruto / 1,19 según el régimen fiscal.
         price_net_eur = None
-        if price_eur:
-            vat_rate = 1.19  # IVA alemán por defecto
-            price_net_eur = round(price_eur / vat_rate, 2)
 
         # Preparar consumo (convertir float a objeto Consumption si existe)
         consumption = None

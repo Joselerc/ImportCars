@@ -120,6 +120,9 @@
       version: byId("m_version").value.trim() || null,
       first_registration: byId("m_date").value,
       purchase_price: numeric("m_price"),
+      purchase_price_net: numeric("m_price_net"),
+      vat_deductible: byId("m_vat_deductible").value === "true",
+      unregistered_new: byId("m_unregistered_new").value === "true",
       fuel: byId("m_fuel").value,
       displacement_cc: numeric("m_cc"),
       cylinders: numeric("m_cylinders"),
@@ -129,6 +132,7 @@
       body_type: byId("m_body").value || null,
       transmission: byId("m_transmission")?.value || null,
       seller_type: byId("m_seller").value,
+      buyer_type: byId("m_buyer_type").value,
       autonomous_community: location.autonomousCommunity,
       municipality: location.municipality,
       co2_confirmed: byId("m_co2_confirmed").checked,
@@ -149,6 +153,9 @@
       m_version: listing.version,
       m_date: listing.first_registration,
       m_price: listing.purchase_price,
+      m_price_net: listing.purchase_price_net,
+      m_vat_deductible: String(Boolean(listing.vat_deductible)),
+      m_unregistered_new: String(Boolean(listing.unregistered_new)),
       m_fuel: listing.fuel,
       m_cc: listing.displacement_cc,
       m_cylinders: listing.cylinders,
@@ -411,6 +418,36 @@
     });
   };
 
+  const renderAuditVat = (vat) => {
+    const panel = byId("audit-vat");
+    if (!panel || !vat) return;
+    panel.hidden = false;
+    const labels = {
+      neto_anuncio: "Neto publicado en el anuncio",
+      bruto_dividido_1_19: "Calculado: bruto ÷ 1,19",
+      precio_sin_iva_desglosable: "Precio sin IVA alemán desglosable",
+      sin_iva_espanol_usado: "No aplica IVA español al usado",
+      sin_iva: "Sin IVA",
+    };
+    const summary = byId("audit-vat-summary");
+    summary.replaceChildren();
+    [
+      ["Condición", vat.fiscal_condition === "nuevo" ? "Nuevo fiscal" : "Usado fiscal"],
+      ["Caso", String(vat.case || "—").replaceAll("_", " ")],
+      ["Base de IVA", money(vat.tax_base_eur)],
+      ["IVA español", money(vat.spanish_vat_eur)],
+      ["Origen de la base", labels[vat.tax_base_source] || vat.tax_base_source || "—"],
+      ["Precio de adquisición", money(vat.acquisition_price_eur)],
+    ].forEach(([label, value]) => {
+      const card = document.createElement("div");
+      card.className = "audit-stat";
+      addTextElement(card, "span", "", label);
+      addTextElement(card, "strong", "", value);
+      summary.appendChild(card);
+    });
+    byId("audit-vat-reason").textContent = `${vat.reason} Vendedor: ${vat.seller_type}; comprador: ${vat.buyer_type}. Bruto: ${money(vat.gross_price_eur)}; neto anunciado: ${money(vat.advertised_net_price_eur)}.`;
+  };
+
   const render = (data) => {
     latestCalculation = data;
     byId("r_car").textContent = data.vehicle_label;
@@ -470,6 +507,7 @@
     );
     riskBox.hidden = !data.warnings || data.warnings.length === 0;
     if (config.auditMode) {
+      renderAuditVat(data.audit?.vat);
       renderAuditBoe(data.audit?.boe);
       renderAuditMarket(data.audit?.market);
     }
@@ -519,6 +557,10 @@
   byId("m_co2").addEventListener("input", () => {
     co2Source = numeric("m_co2") === null ? null : "user";
     byId("m_co2_confirmed").checked = false;
+  });
+  byId("m_price").addEventListener("input", () => {
+    byId("m_price_net").value = "";
+    byId("m_vat_deductible").value = "false";
   });
 
   byId("url-submit").addEventListener("click", async (event) => {

@@ -12,12 +12,14 @@ Las fórmulas implementan:
         BI_IEDMT = VM / (1 + IVA_hist + IEDMT_hist)
   - IEDMT por CO2 con recargo autonómico.
   - ITP = max(precio, valor_tablas_depreciado) x tipo_CCAA (solo particular).
-  - IVA español para vehículos nuevos o adquisición intracomunitaria con ROI.
+  - IVA español para vehículos fiscalmente nuevos, sobre su base neta.
+  - Adquisición intracomunitaria ROI con efecto neto de IVA cero.
   - IVTM por potencia fiscal x coeficiente municipal, prorrateado.
 """
 
 from __future__ import annotations
 
+from calendar import monthrange
 from dataclasses import dataclass, replace
 from datetime import date
 
@@ -30,6 +32,7 @@ from .models import (
     Origen,
     ResultadoFiscal,
     TipoCarroceria,
+    TipoComprador,
     TipoVendedor,
     ValorIntermedio,
     Vehiculo,
@@ -110,13 +113,42 @@ def valor_mercado(vehiculo: Vehiculo, referencia: date | None = None,
 #  Condición fiscal nuevo / usado
 # --------------------------------------------------------------------------- #
 
+def es_nuevo_fiscal(
+    fecha_primera_matriculacion: date | None,
+    kilometros: int | None,
+    *,
+    nuevo_sin_matricular: bool = False,
+    referencia: date | None = None,
+) -> bool:
+    """Devuelve si el vehículo es nuevo a efectos de IVA español.
+
+    Basta con que tenga menos de seis meses o menos de 6.000 km. Los coches
+    anunciados expresamente como nuevos y todavía sin matricular también lo son.
+    """
+    if nuevo_sin_matricular:
+        return True
+    if fecha_primera_matriculacion is None:
+        return False
+    ref = referencia or date.today()
+    registration = fecha_primera_matriculacion
+    month_index = registration.month - 1 + 6
+    cutoff_year = registration.year + month_index // 12
+    cutoff_month = month_index % 12 + 1
+    cutoff_day = min(registration.day, monthrange(cutoff_year, cutoff_month)[1])
+    six_month_cutoff = date(cutoff_year, cutoff_month, cutoff_day)
+    if ref < six_month_cutoff:
+        return True
+    return kilometros is not None and kilometros < 6000
+
+
 def condicion_fiscal(vehiculo: Vehiculo, referencia: date | None = None) -> CondicionFiscal:
     """Nuevo si < 6 meses desde 1ª matriculación O < 6.000 km."""
-    ref = referencia or date.today()
-    meses = (ref - vehiculo.fecha_primera_matriculacion).days / 30.4375
-    if meses < 6:
-        return CondicionFiscal.NUEVO
-    if vehiculo.kilometros is not None and vehiculo.kilometros < 6000:
+    if es_nuevo_fiscal(
+        vehiculo.fecha_primera_matriculacion,
+        vehiculo.kilometros,
+        nuevo_sin_matricular=vehiculo.nuevo_sin_matricular,
+        referencia=referencia,
+    ):
         return CondicionFiscal.NUEVO
     return CondicionFiscal.USADO
 
@@ -170,12 +202,19 @@ def calcular_iedmt(vehiculo: Vehiculo, operacion: Operacion, vm: float) -> tuple
 #  ITP
 # --------------------------------------------------------------------------- #
 
-def calcular_itp(vehiculo: Vehiculo, operacion: Operacion, vm: float) -> tuple[float, float, float]:
+def calcular_itp(
+    vehiculo: Vehiculo,
+    operacion: Operacion,
+    vm: float,
+    condicion: CondicionFiscal | None = None,
+) -> tuple[float, float, float]:
     """ITP solo si se compra a particular. Base = max(precio, VM).
 
     Devuelve (base, tipo, cuota). Si no aplica, todo a 0.
     """
     if operacion.tipo_vendedor != TipoVendedor.PARTICULAR:
+        return 0.0, 0.0, 0.0
+    if condicion == CondicionFiscal.NUEVO:
         return 0.0, 0.0, 0.0
     if operacion.traslado_residencia:
         return 0.0, 0.0, 0.0
@@ -189,21 +228,100 @@ def calcular_itp(vehiculo: Vehiculo, operacion: Operacion, vm: float) -> tuple[f
 #  IVA
 # --------------------------------------------------------------------------- #
 
+@dataclass(frozen=True)
+class _DetalleIva:
+    cuota: float
+    caso: str
+    motivo: str
+    base: float
+    origen_base: str
+    precio_adquisicion: float
+
+
+def _base_neta_profesional(vehiculo: Vehiculo) -> tuple[float, str]:
+    if vehiculo.precio_neto is not None and vehiculo.precio_neto > 0:
+        return vehiculo.precio_neto, "neto_anuncio"
+    return vehiculo.precio_compra / (1.0 + T.IVA_ALEMANIA), "bruto_dividido_1_19"
+
+
+def _calcular_iva_detalle(
+    vehiculo: Vehiculo,
+    operacion: Operacion,
+    condicion: CondicionFiscal,
+) -> _DetalleIva:
+    if operacion.traslado_residencia:
+        return _DetalleIva(
+            0.0,
+            "traslado_residencia",
+            "Operación exenta por traslado de residencia, sujeta a requisitos.",
+            0.0,
+            "sin_iva",
+            vehiculo.precio_compra,
+        )
+
+    if (
+        operacion.tipo_comprador == TipoComprador.EMPRESA_ROI
+        and operacion.tipo_vendedor == TipoVendedor.PROFESIONAL_IVA
+    ):
+        base, source = _base_neta_profesional(vehiculo)
+        return _DetalleIva(
+            0.0,
+            "empresa_roi",
+            "Adquisición intracomunitaria: autoliquida y deduce el IVA; efecto neto cero.",
+            base,
+            source,
+            base,
+        )
+
+    if condicion == CondicionFiscal.USADO:
+        cases = {
+            TipoVendedor.PARTICULAR: (
+                "usado_particular",
+                "Vehículo usado comprado a particular: no lleva IVA español; puede aplicar ITP.",
+            ),
+            TipoVendedor.PROFESIONAL_IVA: (
+                "usado_profesional_iva",
+                "Vehículo usado con factura profesional: no lleva IVA español ni ITP.",
+            ),
+            TipoVendedor.PROFESIONAL_MARGEN: (
+                "usado_profesional_margen",
+                "Vehículo usado en régimen de margen: IVA no desglosado y sin IVA español adicional.",
+            ),
+        }
+        case, reason = cases[operacion.tipo_vendedor]
+        return _DetalleIva(
+            0.0,
+            case,
+            reason,
+            0.0,
+            "sin_iva_espanol_usado",
+            vehiculo.precio_compra,
+        )
+
+    if operacion.tipo_vendedor == TipoVendedor.PROFESIONAL_IVA:
+        base, source = _base_neta_profesional(vehiculo)
+    else:
+        base, source = vehiculo.precio_compra, "precio_sin_iva_desglosable"
+    return _DetalleIva(
+        T.IVA_ESPANA * base,
+        "nuevo_iva_espanol",
+        "Vehículo fiscalmente nuevo: IVA español del 21% sobre el precio neto aplicable.",
+        base,
+        source,
+        vehiculo.precio_compra,
+    )
+
+
 def calcular_iva(vehiculo: Vehiculo, operacion: Operacion,
                  condicion: CondicionFiscal) -> float:
     """IVA español que hay que ingresar en España.
 
-    - Vehículo NUEVO: 21% siempre (modelo 309), venga de donde venga.
-    - Usado + comprador EMPRESA_ROI + vendedor profesional con IVA: adquisición
-      intracomunitaria; se autorepercute y se deduce -> efecto neto 0 (no es un
-      coste). Devolvemos 0 como coste neto.
-    - Usado + particular o margen: sin IVA español (paga ITP o va en el precio).
+    - Empresa ROI + profesional con IVA: autoliquida y deduce; coste neto cero.
+    - Vehículo NUEVO: 21% sobre el neto anunciado, el bruto / 1,19 si procede,
+      o el precio intacto cuando no existe IVA alemán desglosable.
+    - Vehículo USADO: nunca añade IVA español.
     """
-    if operacion.traslado_residencia:
-        return 0.0
-    if condicion == CondicionFiscal.NUEVO:
-        return T.IVA_ESPANA * vehiculo.precio_compra
-    return 0.0
+    return _calcular_iva_detalle(vehiculo, operacion, condicion).cuota
 
 
 # --------------------------------------------------------------------------- #
@@ -353,8 +471,9 @@ def calcular(vehiculo: Vehiculo,
     condicion = condicion_fiscal(vehiculo, referencia)
 
     base_iedmt, tipo_iedmt, iedmt = calcular_iedmt(vehiculo, operacion, vm)
-    base_itp, tipo_itp, itp = calcular_itp(vehiculo, operacion, vm)
-    iva = calcular_iva(vehiculo, operacion, condicion)
+    base_itp, tipo_itp, itp = calcular_itp(vehiculo, operacion, vm, condicion)
+    detalle_iva = _calcular_iva_detalle(vehiculo, operacion, condicion)
+    iva = detalle_iva.cuota
     detalle_ivtm = _calcular_ivtm_detalle(vehiculo, operacion, referencia)
     ivtm = detalle_ivtm.cuota
     ccaa = T.normaliza_ccaa(operacion.comunidad_autonoma)
@@ -399,7 +518,7 @@ def calcular(vehiculo: Vehiculo,
         )
 
     coste = (
-        vehiculo.precio_compra
+        detalle_iva.precio_adquisicion
         + transporte
         + iedmt + itp + iva + ivtm
         + costes.itv_importacion + costes.tasa_dgt + costes.placas
@@ -409,13 +528,19 @@ def calcular(vehiculo: Vehiculo,
 
     desglose = _construir_desglose(
         vehiculo, operacion, costes, transporte, base_iedmt, iedmt, tipo_iedmt,
-        base_itp, itp, tipo_itp, iva, ivtm, otros, auditoria,
+        base_itp, itp, tipo_itp, detalle_iva, ivtm, otros, auditoria,
     )
 
     resultado = ResultadoFiscal(
         base_iedmt=base_iedmt, tipo_iedmt=tipo_iedmt, iedmt=iedmt,
         base_itp=base_itp, tipo_itp=tipo_itp, itp=itp,
-        iva=iva, ivtm_primer_anio=ivtm,
+        iva=iva,
+        caso_iva=detalle_iva.caso,
+        motivo_iva=detalle_iva.motivo,
+        base_iva=detalle_iva.base,
+        origen_base_iva=detalle_iva.origen_base,
+        precio_adquisicion=detalle_iva.precio_adquisicion,
+        ivtm_primer_anio=ivtm,
         transporte=transporte, itv=costes.itv_importacion,
         tasa_dgt=costes.tasa_dgt, placas=costes.placas,
         honorarios_gestion=costes.honorarios_gestion, otros_costes=otros,
@@ -460,23 +585,29 @@ def _construir_desglose(
     base_itp,
     itp,
     tipo_itp,
-    iva,
+    detalle_iva: _DetalleIva,
     ivtm,
     otros,
     auditoria: _ContextoAuditoria,
 ) -> list[LineaCoste]:
     vm = auditoria.valor_mercado
+    iva = detalle_iva.cuota
     lineas = [
         LineaCoste(
             "precio",
             "Precio del coche",
-            vehiculo.precio_compra,
-            formula="Precio de compra declarado en el anuncio",
+            detalle_iva.precio_adquisicion,
+            nota=(
+                "Precio neto para comprador empresa ROI"
+                if detalle_iva.precio_adquisicion != vehiculo.precio_compra
+                else ""
+            ),
+            formula="Precio aplicable a la adquisición según el régimen del comprador",
             intermedios=[
                 ValorIntermedio(
                     "precio_compra",
                     "Precio de compra",
-                    vehiculo.precio_compra,
+                    detalle_iva.precio_adquisicion,
                     "EUR",
                 )
             ],
@@ -613,14 +744,19 @@ def _construir_desglose(
             "IVA (vehículo nuevo)",
             iva,
             nota="21%",
-            formula="precio de compra × tipo de IVA español",
+            formula="base neta aplicable × tipo de IVA español",
             intermedios=[
                 ValorIntermedio(
                     "condicion_fiscal",
                     "Condición fiscal",
                     auditoria.condicion_fiscal.value,
                 ),
-                ValorIntermedio("base_iva", "Base del IVA", vehiculo.precio_compra, "EUR"),
+                ValorIntermedio("base_iva", "Base del IVA", detalle_iva.base, "EUR"),
+                ValorIntermedio(
+                    "origen_base_iva",
+                    "Origen de la base",
+                    detalle_iva.origen_base,
+                ),
                 ValorIntermedio("tipo_iva", "Tipo de IVA", T.IVA_ESPANA * 100, "%"),
                 ValorIntermedio("cuota_iva", "Cuota resultante", iva, "EUR"),
             ],
@@ -696,7 +832,7 @@ def break_even_compraventa(vehiculo: Vehiculo,
     r = calcular(vehiculo, operacion, costes_dealer, referencia=referencia)
     return {
         "break_even": r.coste_cliente_final,   # sin honorarios => coste de reventa
-        "precio_compra": vehiculo.precio_compra,
+        "precio_compra": r.precio_adquisicion,
         "iedmt": r.iedmt,
         "itp": r.itp,
         "iva": r.iva,

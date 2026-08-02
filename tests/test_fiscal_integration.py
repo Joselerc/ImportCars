@@ -59,7 +59,7 @@ def test_internal_scenarios_use_fiscal_engine_without_client_fees(
 
     assert set(scenarios) == {"particular", "empresa_iva", "empresa_margen"}
     assert scenarios["particular"] > scenarios["empresa_iva"]
-    assert scenarios["empresa_iva"] == scenarios["empresa_margen"]
+    assert scenarios["empresa_iva"] < scenarios["empresa_margen"]
 
 
 def test_internal_scenarios_skip_listings_without_mandatory_fiscal_data() -> None:

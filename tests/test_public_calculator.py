@@ -8,7 +8,9 @@ import pytest
 from import_cars.fiscal_data import install_boe_dataset, parse_boe_xml
 from import_cars.services.market_reference import MarketReference
 from import_cars.services.public_calculator import (
+    AuditCalculationInput,
     PublicCalculationInput,
+    calculate_for_audit,
     calculate_for_customer,
 )
 
@@ -198,3 +200,45 @@ async def test_pure_electric_without_reported_co2_uses_zero_iedmt(
     assert iedmt["amount_eur"] == 0
     assert "0 g/km" in iedmt["note"]
     assert not any("CO2 no acreditado" in warning for warning in result.warnings)
+
+
+@pytest.mark.asyncio
+async def test_public_new_vehicle_uses_advertised_net_price_and_exposes_vat_audit(
+    tmp_path: Path, monkeypatch
+) -> None:
+    database = tmp_path / "fiscal.sqlite3"
+    install_boe_dataset(database, parse_boe_xml(FIXTURE.read_bytes()))
+    monkeypatch.setenv("IMPORT_CARS_FISCAL_DATABASE_PATH", str(database))
+
+    result = await calculate_for_audit(
+        AuditCalculationInput(
+            make="Peugeot",
+            model="5008",
+            version="E-5008 GT Elektromotor 210",
+            first_registration=None,
+            unregistered_new=True,
+            purchase_price=54_550,
+            purchase_price_net=45_840.34,
+            vat_deductible=True,
+            fuel="electrico",
+            displacement_cc=0,
+            cylinders=None,
+            co2_gkm=0,
+            mileage_km=16,
+            power_kw=157,
+            body_type="suv",
+            transmission="automatic",
+            seller_type="profesional_iva",
+            autonomous_community="Madrid",
+            municipality="Madrid",
+            co2_confirmed=True,
+            co2_source="listing",
+        ),
+        market_service=EmptyMarketStub(),
+    )
+
+    iva = next(row for row in result.breakdown if row["key"] == "iva")
+    assert iva["amount_eur"] == pytest.approx(45_840.34 * 0.21, abs=0.01)
+    assert result.audit.vat["tax_base_eur"] == 45_840.34
+    assert result.audit.vat["tax_base_source"] == "neto_anuncio"
+    assert result.audit.vat["case"] == "nuevo_iva_espanol"

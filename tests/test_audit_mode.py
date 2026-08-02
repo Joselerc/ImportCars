@@ -145,6 +145,10 @@ async def test_audit_result_exposes_real_fiscal_trace_and_frozen_comparables(
     assert result.audit.boe["candidates"][0]["selected"] is True
     assert result.audit.boe["co2_source"] == "user"
     assert result.audit.boe["co2_value_gkm"] == 148
+    assert result.audit.vat["case"] == "usado_particular"
+    assert result.audit.vat["tax_base_eur"] == 0
+    assert result.audit.vat["tax_base_source"] == "sin_iva_espanol_usado"
+    assert result.audit.vat["spanish_vat_eur"] == 0
     assert "pocos comparables" in result.audit.market["quality_warning"]
 
     fiscal = {line.key: line for line in result.audit.fiscal_breakdown}
