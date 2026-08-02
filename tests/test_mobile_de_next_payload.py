@@ -79,6 +79,7 @@ def test_extracts_current_next_detail_payload() -> None:
             {"tag": "fuel", "value": "Diesel"},
             {"tag": "firstRegistration", "value": "10/2020"},
             {"tag": "co2Emissions", "value": "162 g/km"},
+            {"tag": "damageCondition", "value": "Ocasión, Vehículo accidentado"},
         ],
     }
     decoded = f'1e:[["$","component",null,{{"listing":{json.dumps(listing)}}}]]'
@@ -101,6 +102,8 @@ def test_extracts_current_next_detail_payload() -> None:
     assert result.engine_displacement_cc == 2_993
     assert result.power_kw == 210
     assert result.co2_original_g_km == 162
+    assert result.accident_free is False
+    assert result.damage_condition == "Ocasión, Vehículo accidentado"
 
 
 def test_coches_net_model_catalog_resolves_bmw_x5() -> None:

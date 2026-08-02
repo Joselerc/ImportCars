@@ -690,6 +690,8 @@ def _parsed_listing_payload(listing) -> dict:
         "seller_type": seller_type,
         "vat_deductible": listing.vat_deductible,
         "co2_confirmed": listing.co2_original_g_km is not None,
+        "damaged": listing.accident_free is False,
+        "damage_condition": listing.damage_condition,
     }
     required = (
         "make",

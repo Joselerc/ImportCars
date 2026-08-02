@@ -63,6 +63,43 @@ class MobileDeHttpScraper:
             timeout=self.settings.request_timeout,
         )
 
+    @staticmethod
+    def _accident_free_from_condition(value: str | None) -> bool | None:
+        """Interpret only explicit accident claims; an omitted claim stays unknown."""
+
+        if not value:
+            return None
+        normalized = (
+            value.casefold()
+            .replace("á", "a")
+            .replace("ä", "a")
+            .replace("é", "e")
+            .replace("í", "i")
+            .replace("ó", "o")
+            .replace("ö", "o")
+            .replace("ú", "u")
+            .replace("ü", "u")
+        )
+        accident_free_markers = (
+            "sin accidentes",
+            "unfallfrei",
+            "accident free",
+            "no accident",
+        )
+        damaged_markers = (
+            "accidentado",
+            "vehiculo accidentado",
+            "unfallfahrzeug",
+            "beschadigt",
+            "damaged",
+            "accident vehicle",
+        )
+        if any(marker in normalized for marker in accident_free_markers):
+            return True
+        if any(marker in normalized for marker in damaged_markers):
+            return False
+        return None
+
     def _session_for_current_thread(self):
         session = getattr(self._thread_local, "session", None)
         if session is None:
@@ -288,6 +325,7 @@ class MobileDeHttpScraper:
                 co2 = self._localized_integer(str(value))
                 if co2 is not None:
                     break
+        damage_condition = attributes.get("damageCondition")
         contact = payload.get("contact") or {}
         rating = contact.get("rating") or {}
         phones = contact.get("phones") or []
@@ -344,6 +382,8 @@ class MobileDeHttpScraper:
             images=image_urls,
             seller=seller,
             previous_owners=self._localized_integer(attributes.get("numberOfPreviousOwners")),
+            accident_free=self._accident_free_from_condition(damage_condition),
+            damage_condition=damage_condition,
             metadata=ListingMetadata(
                 vehicle_id=vehicle_id,
                 hsn_tsn=(

@@ -128,3 +128,37 @@ def test_public_input_requires_displacement_for_combustion_vehicle() -> None:
             autonomous_community="Madrid",
             municipality="Madrid",
         )
+
+
+@pytest.mark.asyncio
+async def test_damaged_listing_is_calculated_and_warned(
+    tmp_path: Path, monkeypatch
+) -> None:
+    database = tmp_path / "fiscal.sqlite3"
+    install_boe_dataset(database, parse_boe_xml(FIXTURE.read_bytes()))
+    monkeypatch.setenv("IMPORT_CARS_FISCAL_DATABASE_PATH", str(database))
+
+    result = await calculate_for_customer(
+        PublicCalculationInput(
+            make="Abarth",
+            model="124",
+            version="1.4 Spider",
+            first_registration=date(2018, 5, 1),
+            purchase_price=25_000,
+            fuel="gasolina",
+            displacement_cc=1368,
+            cylinders=4,
+            co2_gkm=148,
+            mileage_km=40_000,
+            power_kw=125,
+            seller_type="particular",
+            autonomous_community="Madrid",
+            municipality="Madrid",
+            damaged=True,
+            damage_condition="Ocasión, Vehículo accidentado",
+        ),
+        market_service=MarketStub(),
+    )
+
+    assert result.final_price_eur > 0
+    assert any("dañado o accidentado" in warning for warning in result.warnings)

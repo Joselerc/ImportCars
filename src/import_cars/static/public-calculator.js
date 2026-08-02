@@ -130,6 +130,8 @@
       autonomous_community: location.autonomousCommunity,
       municipality: location.municipality,
       co2_confirmed: byId("m_co2_confirmed").checked,
+      damaged: byId("m_damaged").value === "true",
+      damage_condition: byId("m_damage_condition").value || null,
     };
     if (config.auditMode && selectedBoeRowId !== null) {
       payload.boe_row_id_override = selectedBoeRowId;
@@ -153,6 +155,8 @@
       m_body: listing.body_type,
       m_transmission: listing.transmission,
       m_seller: listing.seller_type,
+      m_damaged: String(Boolean(listing.damaged)),
+      m_damage_condition: listing.damage_condition,
     };
     Object.entries(values).forEach(([id, value]) => {
       if (byId(id)) byId(id).value = value ?? "";

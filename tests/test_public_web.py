@@ -110,6 +110,8 @@ async def test_public_url_parser_returns_editable_fields(monkeypatch) -> None:
         vat_deductible=True,
         body_type="SUV / Off-road",
         transmission="automatic",
+        accident_free=False,
+        damage_condition="Ocasión, Vehículo accidentado",
     )
     monkeypatch.setattr(webapp, "parse_listing_url", lambda url: listing)
     transport = httpx.ASGITransport(app=webapp.app)
@@ -127,6 +129,8 @@ async def test_public_url_parser_returns_editable_fields(monkeypatch) -> None:
     assert payload["seller_type"] == "profesional_iva"
     assert payload["body_type"] == "suv"
     assert payload["transmission"] == "automatic"
+    assert payload["damaged"] is True
+    assert payload["damage_condition"] == "Ocasión, Vehículo accidentado"
     assert payload["missing_fields"] == []
 
 

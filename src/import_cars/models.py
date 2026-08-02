@@ -110,6 +110,7 @@ class NormalizedListing(BaseModel):
     previous_owners: int | None = None
     service_history: bool | None = None
     accident_free: bool | None = None
+    damage_condition: str | None = None
     metadata: ListingMetadata = Field(default_factory=ListingMetadata)
     vehicle_signature: str | None = None
     variant_key: str | None = None

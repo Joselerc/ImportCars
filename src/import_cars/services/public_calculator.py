@@ -49,6 +49,8 @@ class PublicCalculationInput(BaseModel):
     autonomous_community: str = Field(min_length=1, max_length=80)
     municipality: str = Field(min_length=1, max_length=120)
     co2_confirmed: bool = False
+    damaged: bool = False
+    damage_condition: str | None = Field(None, max_length=160)
 
     @model_validator(mode="after")
     def validate_vehicle(self):
@@ -230,6 +232,13 @@ async def _calculate(
         warnings.append(
             "El anuncio no aporta kilometraje. Confírmalo: por debajo de 6.000 km "
             "el vehículo puede tener la consideración fiscal de nuevo."
+        )
+    if data.damaged:
+        detail = f" ({data.damage_condition})" if data.damage_condition else ""
+        warnings.append(
+            "ATENCIÓN: el anuncio marca el vehículo como dañado o accidentado"
+            f"{detail}. El cálculo se mantiene, pero revisa el alcance de los daños "
+            "y solicita una inspección antes de comprar."
         )
     if not data.version:
         warnings.append(
