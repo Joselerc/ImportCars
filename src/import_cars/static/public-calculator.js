@@ -30,6 +30,7 @@
   let latestCalculation = null;
   let latestSourceUrl = null;
   let selectedBoeRowId = null;
+  let co2Source = "user";
 
   const breakdownHelp = {
     precio: "Es el precio publicado por el vendedor en Alemania, antes de transporte e impuestos españoles.",
@@ -55,6 +56,7 @@
     power_kw: "la potencia",
     body_type: "la carrocería",
     transmission: "el tipo de cambio",
+    co2_gkm: "las emisiones de CO₂",
     seller_type: "el tipo de vendedor",
   };
 
@@ -130,6 +132,7 @@
       autonomous_community: location.autonomousCommunity,
       municipality: location.municipality,
       co2_confirmed: byId("m_co2_confirmed").checked,
+      co2_source: numeric("m_co2") === null ? null : co2Source,
       damaged: byId("m_damaged").value === "true",
       damage_condition: byId("m_damage_condition").value || null,
     };
@@ -163,6 +166,7 @@
     });
     byId("m_body").value = listing.body_type || "";
     byId("m_co2_confirmed").checked = Boolean(listing.co2_confirmed);
+    co2Source = listing.co2_source || (listing.co2_gkm === null ? null : "listing");
     byId("m_prov").value = byId("u_prov").value;
   };
 
@@ -362,6 +366,7 @@
       ["Filtro técnico", String(boe.technical_candidate_count || 0)],
       ["Tras cambio", String(boe.transmission_candidate_count || 0)],
       ["Confianza", boe.confidence === "non_conclusive" ? "No concluyente" : boe.confidence === "manual" ? "Confirmación manual" : boe.confidence === "high" ? "Alta" : "Sin resolver"],
+      ["Fuente CO₂", ({ listing: "Anuncio", memory: "Memoria", user: "Usuario", electric_zero: "Eléctrico puro", missing: "No disponible" })[boe.co2_source] || "No disponible"],
     ].forEach(([label, value]) => {
       const card = document.createElement("div");
       card.className = "audit-stat";
@@ -511,6 +516,10 @@
       selectedBoeRowId = null;
     });
   });
+  byId("m_co2").addEventListener("input", () => {
+    co2Source = numeric("m_co2") === null ? null : "user";
+    byId("m_co2_confirmed").checked = false;
+  });
 
   byId("url-submit").addEventListener("click", async (event) => {
     event.preventDefault();
@@ -538,7 +547,7 @@
         const missing = listing.missing_fields.map((field) => fieldNames[field] || "algún dato necesario");
         setStatus(
           "manual-status",
-          `Revisa los datos: el anuncio no aporta ${missing.join(", ")}.`,
+          listing.co2_prompt || `Revisa los datos: el anuncio no aporta ${missing.join(", ")}.`,
           "error"
         );
       } else {

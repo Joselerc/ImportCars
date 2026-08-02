@@ -133,7 +133,7 @@ def _enrich_listings(listings):
     inferred = sum(
         1
         for listing in enriched
-        if listing.co2_source_type in {"signature_exact", "signature_near"}
+        if listing.co2_source_type == "memory"
     )
     if inferred:
         console.print(

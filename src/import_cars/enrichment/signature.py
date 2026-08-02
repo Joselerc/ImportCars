@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import re
 import unicodedata
-from typing import Any, Optional
+from typing import Any
 
 from ..models import NormalizedListing
 
 
-def normalize_text(value: Optional[str]) -> str:
+def normalize_text(value: str | None) -> str:
     if not value:
         return "na"
     value = (
@@ -17,7 +17,7 @@ def normalize_text(value: Optional[str]) -> str:
     return value or "na"
 
 
-def normalize_fuel_category(value: Optional[str]) -> str:
+def normalize_fuel_category(value: str | None) -> str:
     normalized = normalize_text(value)
     mapping = {
         "benzin": "gasoline",
@@ -44,11 +44,11 @@ def normalize_fuel_category(value: Optional[str]) -> str:
     return mapping.get(normalized, normalized)
 
 
-def _normalize_number(value: Optional[Any]) -> str:
+def _normalize_number(value: Any | None) -> str:
     return "na" if value in (None, "") else str(value)
 
 
-def build_model_key(value: Optional[str]) -> str:
+def build_model_key(value: str | None) -> str:
     tokens = [
         token for token in normalize_text(value).split("_") if token and token != "na"
     ]
@@ -104,5 +104,25 @@ def build_vehicle_signature(listing: NormalizedListing) -> str:
             _normalize_number(listing.power_hp),
             _normalize_number(listing.engine_displacement_cc),
             normalize_text(listing.transmission),
+        ]
+    )
+
+
+def build_co2_memory_key(listing: NormalizedListing) -> str | None:
+    """Strict CO2 identity: make + model + advertised version + registration year."""
+
+    year = (
+        listing.first_registration.year
+        if listing.first_registration
+        else listing.production_year
+    )
+    if not listing.make or not listing.model or not listing.version or year is None:
+        return None
+    return "|".join(
+        [
+            normalize_text(listing.make),
+            normalize_text(listing.model),
+            normalize_text(listing.version),
+            str(year),
         ]
     )

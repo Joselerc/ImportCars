@@ -20,6 +20,7 @@ from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, HttpUrl, model_validator
 
 from .enrichment.body_type import normalize_body_type
+from .enrichment.co2_enricher import Co2Enricher
 from .enrichment.signature import normalize_fuel_category, normalize_text
 from .services import (
     AuditCalculationInput,
@@ -662,6 +663,7 @@ def _parsed_listing_payload(listing) -> dict:
         "phev": "phev",
         "lpg": "glp",
     }
+    public_fuel = fuel_map.get(fuel, "otro")
     is_private = listing.seller and listing.seller.type == "private"
     seller_type = (
         "particular"
@@ -679,8 +681,10 @@ def _parsed_listing_payload(listing) -> dict:
         "version": listing.version,
         "first_registration": first_registration,
         "purchase_price": listing.price_eur,
-        "fuel": fuel_map.get(fuel, "otro"),
-        "displacement_cc": listing.engine_displacement_cc,
+        "fuel": public_fuel,
+        "displacement_cc": (
+            0 if public_fuel == "electrico" else listing.engine_displacement_cc
+        ),
         "cylinders": listing.cylinders,
         "co2_gkm": _co2_value(listing.model_dump()),
         "mileage_km": listing.mileage_km,
@@ -690,6 +694,13 @@ def _parsed_listing_payload(listing) -> dict:
         "seller_type": seller_type,
         "vat_deductible": listing.vat_deductible,
         "co2_confirmed": listing.co2_original_g_km is not None,
+        "co2_source": (
+            listing.co2_source_type
+            if listing.co2_source_type in {"listing", "memory", "electric_zero"}
+            else "listing"
+            if listing.co2_original_g_km is not None
+            else None
+        ),
         "damaged": listing.accident_free is False,
         "damage_condition": listing.damage_condition,
     }
@@ -699,10 +710,34 @@ def _parsed_listing_payload(listing) -> dict:
         "first_registration",
         "purchase_price",
         "displacement_cc",
-        "cylinders",
         "power_kw",
     )
-    payload["missing_fields"] = [field for field in required if not payload[field]]
+    payload["missing_fields"] = [
+        field
+        for field in required
+        if not payload[field]
+        and not (field == "displacement_cc" and payload["fuel"] == "electrico")
+    ]
+    if payload["fuel"] != "electrico" and payload["co2_gkm"] is None:
+        payload["missing_fields"].append("co2_gkm")
+        vehicle = " ".join(
+            filter(
+                None,
+                [
+                    listing.make,
+                    listing.model,
+                    listing.version,
+                    str(registration.year) if registration else "año no disponible",
+                ],
+            )
+        )
+        payload["co2_prompt"] = (
+            f"No encontramos el CO₂ para {vehicle}. Busca las emisiones combinadas "
+            "en el anuncio o en el CoC e introdúcelas en g/km. Este dato se usará "
+            "solo en tu cálculo y no se guardará."
+        )
+    else:
+        payload["co2_prompt"] = None
     return payload
 
 
@@ -852,7 +887,8 @@ async def parse_public_listing(
         listing = await asyncio.to_thread(parse_listing_url, str(request.url))
     except ListingParseError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    return _parsed_listing_payload(listing)
+    listing = await asyncio.to_thread(Co2Enricher().enrich, [listing])
+    return _parsed_listing_payload(listing[0])
 
 
 @app.post("/api/public/calculate")

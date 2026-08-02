@@ -119,6 +119,7 @@ def calculation_input() -> PublicCalculationInput:
         autonomous_community="Madrid",
         municipality="Madrid",
         co2_confirmed=True,
+        co2_source="user",
     )
 
 
@@ -142,6 +143,8 @@ async def test_audit_result_exposes_real_fiscal_trace_and_frozen_comparables(
     assert result.audit.market["comparables"][0]["transmission"] == "manual"
     assert result.audit.boe["technical_candidate_count"] == 1
     assert result.audit.boe["candidates"][0]["selected"] is True
+    assert result.audit.boe["co2_source"] == "user"
+    assert result.audit.boe["co2_value_gkm"] == 148
     assert "pocos comparables" in result.audit.market["quality_warning"]
 
     fiscal = {line.key: line for line in result.audit.fiscal_breakdown}

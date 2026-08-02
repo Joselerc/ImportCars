@@ -49,6 +49,7 @@ class PublicCalculationInput(BaseModel):
     autonomous_community: str = Field(min_length=1, max_length=80)
     municipality: str = Field(min_length=1, max_length=120)
     co2_confirmed: bool = False
+    co2_source: Literal["listing", "memory", "user", "electric_zero"] | None = None
     damaged: bool = False
     damage_condition: str | None = Field(None, max_length=160)
 
@@ -126,14 +127,27 @@ _BOE_FUEL_CODES = {
 }
 
 
-def _effective_co2(data: PublicCalculationInput) -> float | None:
-    """Pure battery-electric vehicles have guaranteed zero tailpipe CO2."""
+def _co2_context(data: PublicCalculationInput) -> tuple[float | None, str, float]:
+    """Resolve effective CO2, its auditable provenance and confidence."""
 
-    return 0.0 if data.fuel == "electrico" else data.co2_gkm
+    if data.fuel == "electrico":
+        source = "listing" if data.co2_source == "listing" and data.co2_gkm == 0 else "electric_zero"
+        return 0.0, source, 1.0
+    if data.co2_gkm is None:
+        return None, "missing", 0.0
+    source = data.co2_source or "user"
+    confidence = (
+        1.0
+        if source == "listing" or data.co2_confirmed
+        else 0.9
+        if source == "memory"
+        else 0.5
+    )
+    return data.co2_gkm, source, confidence
 
 
 def _market_target(data: PublicCalculationInput) -> NormalizedListing:
-    co2 = _effective_co2(data)
+    co2, co2_source, co2_confidence = _co2_context(data)
     return NormalizedListing(
         listing_id="public-calculation",
         source="manual",
@@ -157,13 +171,8 @@ def _market_target(data: PublicCalculationInput) -> NormalizedListing:
         body_type=data.body_type,
         transmission=data.transmission,
         co2_original_g_km=round(co2) if co2 is not None else None,
-        co2_confidence=(
-            1.0
-            if data.fuel == "electrico" or data.co2_confirmed
-            else 0.5
-            if co2 is not None
-            else 0.0
-        ),
+        co2_source_type=co2_source,
+        co2_confidence=co2_confidence,
         seller=Seller(type="private" if data.seller_type == "particular" else "dealer"),
     )
 
@@ -200,7 +209,7 @@ async def _calculate(
         selected_row_id=selected_boe_row_id,
     )
     resolution = boe_audit.resolution
-    effective_co2 = _effective_co2(data)
+    effective_co2, co2_source, co2_confidence = _co2_context(data)
     vehicle = Vehiculo(
         marca=data.make,
         modelo=" ".join(filter(None, [data.model, data.version])),
@@ -213,13 +222,7 @@ async def _calculate(
         potencia_kw=data.power_kw,
         cvf=data.cvf if data.cvf is not None else resolution.fiscal_hp if resolution else None,
         valor_tablas_nuevo=resolution.value_eur if resolution else None,
-        co2_confianza=(
-            1.0
-            if data.fuel == "electrico" or data.co2_confirmed
-            else 0.5
-            if effective_co2 is not None
-            else 0.0
-        ),
+        co2_confianza=co2_confidence,
         carroceria=TipoCarroceria(data.body_type) if data.body_type else None,
         boe_fila_id=resolution.row_id if resolution else None,
         boe_orden=resolution.order_code if resolution else None,
@@ -350,6 +353,8 @@ async def _calculate(
                 "price_spread_pct": boe_audit.price_spread_pct,
                 "warning": boe_audit.warning,
                 "missing_technical_fields": list(boe_audit.missing_technical_fields),
+                "co2_value_gkm": effective_co2,
+                "co2_source": co2_source,
                 "selected_row_id": resolution.row_id if resolution else None,
                 "candidates": [
                     {

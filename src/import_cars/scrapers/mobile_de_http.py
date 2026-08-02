@@ -781,6 +781,13 @@ class MobileDeHttpScraper:
             power_kw=tech_data.get("power_kw"),
             engine_displacement_cc=tech_data.get("cubic_capacity_ccm"),
             co2_emissions_g_km=tech_data.get("co2_emissions_g_km"),
+            co2_original_g_km=tech_data.get("co2_emissions_g_km"),
+            co2_source_type=(
+                "listing" if tech_data.get("co2_emissions_g_km") is not None else None
+            ),
+            co2_confidence=(
+                1.0 if tech_data.get("co2_emissions_g_km") is not None else 0.0
+            ),
             consumption_l_100km=consumption,
             description=tech_data.get("description"),
             images=images,

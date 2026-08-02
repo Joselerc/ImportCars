@@ -8,6 +8,7 @@ import httpx
 import pytest
 
 from import_cars import webapp
+from import_cars.enrichment import co2_memory
 from import_cars.fiscal_data import install_boe_dataset, parse_boe_xml
 from import_cars.models import NormalizedListing, Registration, Seller
 from import_cars.services.market_reference import MarketReference
@@ -132,6 +133,45 @@ async def test_public_url_parser_returns_editable_fields(monkeypatch) -> None:
     assert payload["damaged"] is True
     assert payload["damage_condition"] == "Ocasión, Vehículo accidentado"
     assert payload["missing_fields"] == []
+
+
+@pytest.mark.asyncio
+async def test_public_url_parser_guides_missing_co2_without_learning_user_value(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.setattr(co2_memory, "MEMORY_PATH", tmp_path / "co2_memory.json")
+    listing = NormalizedListing(
+        listing_id="missing-co2",
+        source="mobile_de",
+        url="https://www.mobile.de/details.html?id=missing-co2",
+        scraped_at=datetime.now(UTC),
+        make="Volkswagen",
+        model="Golf",
+        version="1.5 TSI Style",
+        price_eur=20_000,
+        first_registration=Registration(year=2021, month=5),
+        fuel_type="Gasolina",
+        engine_displacement_cc=1498,
+        power_kw=110,
+        seller=Seller(type="dealer"),
+    )
+    monkeypatch.setattr(webapp, "parse_listing_url", lambda url: listing)
+    transport = httpx.ASGITransport(app=webapp.app)
+
+    async with httpx.AsyncClient(
+        transport=transport, base_url="http://testserver"
+    ) as client:
+        response = await client.post(
+            "/api/public/parse-listing",
+            json={"url": "https://www.mobile.de/details.html?id=missing-co2"},
+        )
+
+    payload = response.json()
+    assert response.status_code == 200
+    assert "co2_gkm" in payload["missing_fields"]
+    assert "Volkswagen Golf 1.5 TSI Style 2021" in payload["co2_prompt"]
+    assert "no se guardará" in payload["co2_prompt"]
+    assert not co2_memory.MEMORY_PATH.exists()
 
 
 @pytest.mark.asyncio
