@@ -347,6 +347,7 @@ async def _calculate(
                         "text_score": candidate.text_score,
                         "transmission_kind": candidate.transmission_kind,
                         "transmission_compatible": candidate.transmission_compatible,
+                        "cylinders_compatible": candidate.cylinders_compatible,
                         "selected": candidate.selected,
                         "decision": candidate.decision,
                     }

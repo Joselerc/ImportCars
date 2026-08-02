@@ -76,6 +76,7 @@ class BoeValueCandidate:
     text_score: float
     transmission_kind: str
     transmission_compatible: bool | None
+    cylinders_compatible: bool | None
     selected: bool = False
     decision: str = ""
 
@@ -160,6 +161,18 @@ def _text_similarity(query: str, candidate: str) -> float:
     return score
 
 
+def _model_head(value: str) -> str:
+    """Return the stable model token, treating BOE's E- prefix as decoration."""
+
+    tokens = value.split()
+    if not tokens:
+        return ""
+    if tokens[0] == "e" and len(tokens) > 1:
+        return tokens[1]
+    numeric = re.fullmatch(r"(\d+)[a-z]", tokens[0])
+    return numeric.group(1) if numeric else tokens[0]
+
+
 def _boe_transmission(model_type: str) -> str:
     tokens = set(_normalize(model_type).split())
     if tokens & _AUTOMATIC_MARKERS or any(
@@ -229,9 +242,9 @@ def resolver_diagnostico_valor_tablas(
 ) -> BoeResolutionAudit:
     """Resolve and expose the complete BOE candidate funnel.
 
-    Make/model/year establish the search universe. Displacement, kW, fuel and
-    cylinder count are mandatory exact filters. Text is used only after those
-    technical facts and transmission have narrowed the candidates.
+    Make/model/year establish the search universe. Displacement, kW and fuel are
+    mandatory exact filters for combustion vehicles. Cylinder count is only an
+    optional preference. Text is used after the technical and transmission facts.
     """
 
     year = fecha if isinstance(fecha, int) else fecha.year
@@ -278,19 +291,30 @@ def resolver_diagnostico_valor_tablas(
             (normalized_brand, year, year),
         ).fetchall()
 
-    model_head = query.split()[0] if query else ""
+    model_head = _model_head(query)
     base_rows = [
         row
         for row in rows
-        if (candidate := _normalize(row[1])) and candidate.split()[0] == model_head
+        if (candidate := _normalize(row[1]))
+        and (
+            _model_head(candidate) == model_head
+            or (
+                _fuel_code(row[6]) == "ELC"
+                and _model_head(candidate) == model_head
+            )
+        )
     ]
     required = {
         "displacement_cc": displacement_cc,
         "power_kw": power_kw,
         "fuel_code": _fuel_code(fuel_code),
-        "cylinders": cylinders,
     }
-    missing = tuple(key for key, value in required.items() if value is None)
+    electric = required["fuel_code"] == "ELC"
+    missing = tuple(
+        key
+        for key, value in required.items()
+        if value is None and not (key == "displacement_cc" and electric)
+    )
     if missing:
         return _empty_audit(
             query=query,
@@ -299,16 +323,22 @@ def resolver_diagnostico_valor_tablas(
             base_candidate_count=len(base_rows),
             missing=missing,
             warning=(
-                "No se puede identificar una fila oficial sin cilindrada, potencia, "
-                "combustible y número de cilindros confirmados."
+                "No se puede identificar una fila oficial sin cilindrada, potencia "
+                "y combustible confirmados. La cilindrada no aplica al eléctrico puro."
             ),
         )
 
     technical_rows = [
         row
         for row in base_rows
-        if row[4] == int(displacement_cc)
-        and row[5] == int(cylinders)
+        if (
+            (electric and row[4] in (None, 0))
+            or (
+                not electric
+                and displacement_cc is not None
+                and row[4] == int(displacement_cc)
+            )
+        )
         and _fuel_code(row[6]) == required["fuel_code"]
         and row[7] is not None
         and float(row[7]) == float(power_kw)
@@ -321,7 +351,7 @@ def resolver_diagnostico_valor_tablas(
             base_candidate_count=len(base_rows),
             warning=(
                 "Ninguna fila del BOE coincide exactamente en cilindrada, potencia, "
-                "combustible, cilindros y periodo comercial."
+                "combustible y periodo comercial."
             ),
         )
 
@@ -331,7 +361,12 @@ def resolver_diagnostico_valor_tablas(
         transmission_kind = _boe_transmission(row[1])
         compatible = (
             transmission_kind == requested_transmission
-            if requested_transmission is not None
+            if requested_transmission is not None and _fuel_code(row[6]) != "ELC"
+            else None
+        )
+        cylinders_compatible = (
+            row[5] == int(cylinders)
+            if cylinders is not None and row[5] is not None
             else None
         )
         candidates.append(
@@ -353,14 +388,21 @@ def resolver_diagnostico_valor_tablas(
                 text_score=round(_text_similarity(query, _normalize(row[1])), 4),
                 transmission_kind=transmission_kind,
                 transmission_compatible=compatible,
+                cylinders_compatible=cylinders_compatible,
             )
         )
 
+    cylinder_matches = [
+        candidate for candidate in candidates if candidate.cylinders_compatible is True
+    ]
+    cylinder_pool = cylinder_matches or candidates
     compatible_candidates = [
-        candidate for candidate in candidates if candidate.transmission_compatible is not False
+        candidate
+        for candidate in cylinder_pool
+        if candidate.transmission_compatible is not False
     ]
     transmission_conflict = requested_transmission is not None and not compatible_candidates
-    selection_pool = compatible_candidates or candidates
+    selection_pool = compatible_candidates or cylinder_pool
     selection_pool.sort(key=lambda item: (item.text_score, item.value_eur), reverse=True)
 
     manually_selected = False
@@ -421,6 +463,16 @@ def resolver_diagnostico_valor_tablas(
                     decision=(
                         f"Descartada: el BOE parece {candidate.transmission_kind} y el "
                         f"anuncio declara {requested_transmission}."
+                    ),
+                )
+            )
+        elif cylinder_matches and candidate.cylinders_compatible is not True:
+            decorated.append(
+                replace(
+                    candidate,
+                    decision=(
+                        "No elegida: el número de cilindros no coincide con el anuncio; "
+                        "se usó solo como desempate opcional."
                     ),
                 )
             )

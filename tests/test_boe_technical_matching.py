@@ -74,6 +74,18 @@ def _peugeot_database(path: Path) -> Path:
             """,
             other,
         )
+        connection.executemany(
+            """
+            INSERT INTO boe_valores VALUES (
+                ?, 1, 'passenger_vehicle', 'PEUGEOT', ?, 2024, NULL,
+                NULL, NULL, 'Elc', 157, 20.2, 210, ?
+            )
+            """,
+            [
+                (42091, "E-5008 Allure Eléctrico", 37_200),
+                (42093, "E-5008 GT Eléctrico", 41_100),
+            ],
+        )
     return path
 
 
@@ -136,3 +148,45 @@ def test_no_technical_candidate_returns_none_and_explicit_warning(tmp_path: Path
     assert audit.resolution is None
     assert audit.confidence_label == "none"
     assert "Ninguna fila" in audit.warning
+
+
+def test_missing_cylinders_never_blocks_an_exact_technical_match(tmp_path: Path) -> None:
+    audit = _resolve(
+        _peugeot_database(tmp_path / "fiscal.sqlite3"),
+        cylinders=None,
+    )
+
+    assert audit.technical_candidate_count == 4
+    assert audit.resolution is not None
+    assert "cylinders" not in audit.missing_technical_fields
+
+
+def test_cylinders_are_only_an_optional_preference(tmp_path: Path) -> None:
+    audit = _resolve(
+        _peugeot_database(tmp_path / "fiscal.sqlite3"),
+        cylinders=3,
+    )
+
+    assert audit.technical_candidate_count == 4
+    assert audit.resolution is not None
+
+
+def test_electric_model_resolves_without_displacement_or_cylinders(
+    tmp_path: Path,
+) -> None:
+    audit = resolver_diagnostico_valor_tablas(
+        "Peugeot",
+        "5008 E-5008 GT Elektromotor 210",
+        2025,
+        displacement_cc=0,
+        power_kw=157,
+        fuel_code="Elc",
+        cylinders=None,
+        transmission="Automático",
+        database_path=_peugeot_database(tmp_path / "fiscal.sqlite3"),
+    )
+
+    assert audit.technical_candidate_count == 2
+    assert audit.resolution is not None
+    assert audit.resolution.row_id == 42093
+    assert audit.resolution.value_eur == 41_100
