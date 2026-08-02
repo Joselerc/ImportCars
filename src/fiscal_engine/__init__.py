@@ -34,6 +34,7 @@ from .models import (
     TipoCarroceria,
     TipoComprador,
     TipoVendedor,
+    ValorIntermedio,
     Vehiculo,
 )
 
@@ -48,6 +49,7 @@ __all__ = [
     "TipoCarroceria",
     "TipoComprador",
     "TipoVendedor",
+    "ValorIntermedio",
     "Vehiculo",
     "base_imponible_iedmt",
     "break_even_compraventa",

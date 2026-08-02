@@ -97,6 +97,11 @@ class Vehiculo:
     co2_confianza: float = 1.0
     # Solo determina el tramo de transporte; nunca altera una fórmula fiscal.
     carroceria: Optional[TipoCarroceria] = None
+    # Trazabilidad de la fila oficial resuelta fuera del motor fiscal.
+    boe_fila_id: Optional[int] = None
+    boe_orden: Optional[str] = None
+    boe_ejercicio: Optional[int] = None
+    boe_modelo_resuelto: Optional[str] = None
 
 
 @dataclass
@@ -139,12 +144,25 @@ class CostesConfig:
 # --------------------------------------------------------------------------- #
 
 @dataclass
+class ValorIntermedio:
+    """Un dato real empleado por una fórmula, listo para auditar."""
+
+    clave: str
+    etiqueta: str
+    valor: float | int | str | bool | None
+    unidad: str = ""
+    nota: str = ""
+
+
+@dataclass
 class LineaCoste:
     """Una línea del desglose, con etiqueta legible y nota opcional."""
     clave: str
     etiqueta: str
     importe: float
     nota: str = ""
+    formula: str = ""
+    intermedios: list[ValorIntermedio] = field(default_factory=list)
 
 
 @dataclass

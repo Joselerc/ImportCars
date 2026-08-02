@@ -27,6 +27,14 @@ from .base import BaseScraper
 
 logger = logging.getLogger(__name__)
 
+# Etiquetas observadas en las respuestas actuales de coches.net. Se guardan en
+# metadata para auditoría y deliberadamente no alimentan los filtros/matching.
+_COCHES_NET_SOURCE_TRANSMISSIONS = {
+    1: "automatic",
+    2: "manual",
+    3: "semi_automatic",
+}
+
 
 class CochesNetScraper(BaseScraper):
     def __init__(self):
@@ -393,16 +401,29 @@ class CochesNetScraper(BaseScraper):
                     logger.debug("Fecha de publicación no válida: %r", source_date)
 
             # Crear metadata con fecha de publicación
-            metadata = ListingMetadata(publish_date=publish_date)
+            metadata = ListingMetadata(
+                publish_date=publish_date,
+                source_transmission=_COCHES_NET_SOURCE_TRANSMISSIONS.get(
+                    data.get("transmissionTypeId")
+                ),
+            )
 
+            make = data.get("make")
+            model = data.get("model")
+            title = data.get("title")
+            version = title
+            prefix = " ".join(filter(None, [make, model]))
+            if title and prefix and title.casefold().startswith(prefix.casefold()):
+                version = title[len(prefix) :].strip() or None
             return NormalizedListing(
                 listing_id=str(listing_id),
                 source="coches_net",
                 url=url,
                 scraped_at=datetime.now(UTC),
-                title=data.get("title"),
-                make=data.get("make"),
-                model=data.get("model"),
+                title=title,
+                make=make,
+                model=model,
+                version=version,
                 price_eur=price_eur,
                 price_original=Price(amount=price_eur, currency_code="EUR")
                 if price_eur

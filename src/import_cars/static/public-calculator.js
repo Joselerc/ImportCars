@@ -52,6 +52,7 @@
     mileage_km: "los kilómetros",
     power_kw: "la potencia",
     body_type: "la carrocería",
+    transmission: "el tipo de cambio",
     seller_type: "el tipo de vendedor",
   };
 
@@ -121,6 +122,7 @@
       mileage_km: numeric("m_km"),
       power_kw: numeric("m_kw"),
       body_type: byId("m_body").value || null,
+      transmission: byId("m_transmission")?.value || null,
       seller_type: byId("m_seller").value,
       autonomous_community: location.autonomousCommunity,
       municipality: location.municipality,
@@ -141,6 +143,7 @@
       m_km: listing.mileage_km,
       m_kw: listing.power_kw,
       m_body: listing.body_type,
+      m_transmission: listing.transmission,
       m_seller: listing.seller_type,
     };
     Object.entries(values).forEach(([id, value]) => {
@@ -159,9 +162,21 @@
 
   const displayNote = (note) => String(note || "").replaceAll("CO2", "CO₂").replaceAll(" -> ", " → ");
 
-  const addBreakdownRow = (container, row, extraClass = "") => {
-    const element = document.createElement("div");
-    element.className = `bd-row ${extraClass}`.trim();
+  const auditValue = (item) => {
+    const value = item?.value;
+    if (value === null || value === undefined || value === "") return "No disponible";
+    if (item.unit === "EUR") return new Intl.NumberFormat("es-ES", { style: "currency", currency: "EUR", maximumFractionDigits: 2 }).format(Number(value));
+    if (typeof value === "number") {
+      const formatted = new Intl.NumberFormat("es-ES", { maximumFractionDigits: 4 }).format(value);
+      return `${formatted}${item.unit ? ` ${item.unit}` : ""}`;
+    }
+    return `${value}${item.unit ? ` ${item.unit}` : ""}`;
+  };
+
+  const addBreakdownRow = (container, row, extraClass = "", auditLine = null) => {
+    const element = document.createElement(auditLine ? "details" : "div");
+    element.className = `bd-row ${extraClass} ${auditLine ? "audit-breakdown" : ""}`.trim();
+    const shell = auditLine ? document.createElement("summary") : element;
     const label = document.createElement("div");
     label.className = "bd-label";
     const labelBlock = document.createElement("div");
@@ -187,8 +202,141 @@
     const value = document.createElement("div");
     value.className = "bd-val";
     value.textContent = money(row.amount_eur);
-    element.append(label, value);
+    shell.append(label, value);
+    if (auditLine) {
+      element.appendChild(shell);
+      const detail = document.createElement("div");
+      detail.className = "audit-line-detail";
+      const formula = document.createElement("div");
+      formula.className = "audit-formula";
+      formula.textContent = auditLine.formula || "Partida directa sin fórmula adicional.";
+      const values = document.createElement("div");
+      values.className = "audit-values";
+      (auditLine.intermediates || []).forEach((item) => {
+        const wrapper = document.createElement("div");
+        wrapper.className = "audit-value";
+        const itemLabel = document.createElement("span");
+        itemLabel.textContent = item.label;
+        const itemValue = document.createElement("strong");
+        itemValue.textContent = auditValue(item);
+        if (item.note) {
+          const note = document.createElement("small");
+          note.textContent = item.note;
+          itemValue.appendChild(note);
+        }
+        wrapper.append(itemLabel, itemValue);
+        values.appendChild(wrapper);
+      });
+      detail.append(formula, values);
+      element.appendChild(detail);
+    }
     container.appendChild(element);
+  };
+
+  const addTextElement = (parent, tag, className, text) => {
+    const element = document.createElement(tag);
+    if (className) element.className = className;
+    element.textContent = text;
+    parent.appendChild(element);
+    return element;
+  };
+
+  const statusLabel = {
+    used: "Usado",
+    not_used: "No usado",
+    unavailable: "Sin dato",
+  };
+
+  const renderAuditMarket = (market) => {
+    const panel = byId("audit-market");
+    if (!panel || !market) return;
+    panel.hidden = false;
+
+    const summary = byId("audit-summary");
+    summary.replaceChildren();
+    [
+      ["Precio medio", money(market.average_eur)],
+      ["Rango mínimo–máximo", market.minimum_eur === null ? "—" : `${money(market.minimum_eur)} – ${money(market.maximum_eur)}`],
+      ["Comparables", String(market.sample_size || 0)],
+      ["Nivel aplicado", market.match_level || "Sin nivel"],
+    ].forEach(([label, value]) => {
+      const card = document.createElement("div");
+      card.className = "audit-stat";
+      addTextElement(card, "span", "", label);
+      addTextElement(card, "strong", "", value);
+      summary.appendChild(card);
+    });
+
+    const warning = byId("audit-warning");
+    const warningText = market.quality_warning || (market.sample_size === 0 ? "No se encontró ningún comparable homologable para esta búsqueda." : "");
+    warning.textContent = warningText;
+    warning.hidden = !warningText;
+
+    const criteria = byId("audit-criteria");
+    criteria.replaceChildren();
+    (market.criteria || []).forEach((criterion) => {
+      const card = document.createElement("div");
+      card.className = "criterion";
+      const head = document.createElement("div");
+      head.className = "criterion-head";
+      addTextElement(head, "strong", "", criterion.label);
+      addTextElement(head, "span", `status-chip status-${criterion.status}`, statusLabel[criterion.status] || criterion.status);
+      card.appendChild(head);
+      addTextElement(card, "code", "", criterion.target_value ?? "No disponible");
+      addTextElement(card, "p", "", criterion.rule);
+      if (criterion.note) addTextElement(card, "p", "", criterion.note);
+      criteria.appendChild(card);
+    });
+
+    const comparables = byId("audit-comparables");
+    comparables.replaceChildren();
+    (market.comparables || []).forEach((car, index) => {
+      const details = document.createElement("details");
+      const itemSummary = document.createElement("summary");
+      const heading = document.createElement("div");
+      heading.className = "comparable-head";
+      addTextElement(heading, "strong", "", `${index + 1}. ${car.title || car.version || "Anuncio sin título"}`);
+      addTextElement(heading, "span", "", `${money(car.price_eur)} · nivel ${car.match_level}`);
+      itemSummary.appendChild(heading);
+      details.appendChild(itemSummary);
+      const body = document.createElement("div");
+      body.className = "audit-detail-body";
+      const facts = document.createElement("div");
+      facts.className = "comparable-facts";
+      [
+        ["Kilómetros", car.mileage_km === null ? "No consta" : `${new Intl.NumberFormat("es-ES").format(car.mileage_km)} km`],
+        ["Año", car.year ?? "No consta"],
+        ["Combustible", car.fuel || "No consta"],
+        ["Cambio", car.transmission || "No consta"],
+        ["Versión / motor", car.version || "No consta"],
+      ].forEach(([label, value]) => {
+        const fact = document.createElement("div");
+        fact.className = "comparable-fact";
+        addTextElement(fact, "span", "", label);
+        addTextElement(fact, "strong", "", String(value));
+        facts.appendChild(fact);
+      });
+      body.appendChild(facts);
+      const link = document.createElement("a");
+      link.className = "comparable-link";
+      link.href = car.url;
+      link.target = "_blank";
+      link.rel = "noopener";
+      link.textContent = "Abrir anuncio en coches.net ↗";
+      body.appendChild(link);
+      const groups = { used: [], not_used: [], unavailable: [] };
+      (car.checks || []).forEach((check) => groups[check.status]?.push(check.label));
+      const checks = document.createElement("div");
+      checks.className = "audit-checks";
+      checks.textContent = [
+        `Usados: ${groups.used.join(", ") || "ninguno"}.`,
+        `No usados por la política actual: ${groups.not_used.join(", ") || "ninguno"}.`,
+        `No aplicables por falta de datos: ${groups.unavailable.join(", ") || "ninguno"}.`,
+      ].join(" ");
+      body.appendChild(checks);
+      details.appendChild(body);
+      comparables.appendChild(details);
+    });
   };
 
   const render = (data) => {
@@ -217,7 +365,13 @@
 
     const rows = byId("breakdown-rows");
     rows.replaceChildren();
-    (data.breakdown || []).forEach((row) => addBreakdownRow(rows, row, row.key === "honorarios" ? "fee" : ""));
+    const auditLines = new Map((data.audit?.fiscal_breakdown || []).map((line) => [line.key, line]));
+    (data.breakdown || []).forEach((row) => addBreakdownRow(
+      rows,
+      row,
+      row.key === "honorarios" ? "fee" : "",
+      config.auditMode ? auditLines.get(row.key) : null
+    ));
     addBreakdownRow(rows, {
       key: "total",
       label: "Precio final, todo incluido",
@@ -239,6 +393,7 @@
       riskList.appendChild(item);
     });
     riskBox.hidden = !data.warnings || data.warnings.length === 0;
+    if (config.auditMode) renderAuditMarket(data.audit?.market);
 
     const whatsapp = byId("whatsapp-link");
     const message = encodeURIComponent(
@@ -256,7 +411,7 @@
     setStatus("manual-status", "Consultando Hacienda y comparables de coches.net…");
     setButtonLoading(button, true);
     try {
-      const response = await fetch("/api/public/calculate", {
+      const response = await fetch(config.calculationEndpoint || "/api/public/calculate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(manualPayload()),

@@ -25,6 +25,7 @@ _BRAND_ALIASES = {
 class BoeValueResolution:
     """The exact official row selected for one vehicle."""
 
+    row_id: int
     value_eur: float
     brand: str
     model_type: str
@@ -118,7 +119,7 @@ def resolver_registro_valor_tablas(
             SELECT
                 v.brand, v.model_type, v.commercial_start, v.commercial_end,
                 v.displacement_cc, v.power_kw, v.fiscal_hp, v.power_cv,
-                v.value_eur, d.order_code, d.exercise
+                v.value_eur, d.order_code, d.exercise, v.id
             FROM boe_valores AS v
             JOIN boe_dataset_versions AS d ON d.id = v.dataset_id
             WHERE UPPER(v.brand) = ?
@@ -160,6 +161,7 @@ def resolver_registro_valor_tablas(
             return None
 
     return BoeValueResolution(
+        row_id=int(best[11]),
         value_eur=float(best[8]),
         brand=best[0],
         model_type=best[1],

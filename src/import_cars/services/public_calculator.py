@@ -42,6 +42,7 @@ class PublicCalculationInput(BaseModel):
         "deportivo_gama_alta",
         "otro",
     ] | None = None
+    transmission: Literal["manual", "automatic", "semi_automatic"] | None = None
     cvf: float | None = Field(None, ge=0, le=200)
     seller_type: Literal["particular", "profesional_iva", "profesional_margen"]
     autonomous_community: str = Field(min_length=1, max_length=80)
@@ -70,6 +71,23 @@ class PublicCalculationResult(BaseModel):
     warnings: list[str]
     fiscal_version: str
     boe_model_match: str | None
+
+
+class FiscalAuditLine(BaseModel):
+    key: str
+    label: str
+    amount_eur: float
+    formula: str
+    intermediates: list[dict[str, str | int | float | bool | None]]
+
+
+class CalculationAudit(BaseModel):
+    market: dict
+    fiscal_breakdown: list[FiscalAuditLine]
+
+
+class AuditCalculationResult(PublicCalculationResult):
+    audit: CalculationAudit
 
 
 _FUEL_MAP = {
@@ -110,17 +128,19 @@ def _market_target(data: PublicCalculationInput) -> NormalizedListing:
         power_hp=round(data.power_kw * 1.35962) if data.power_kw is not None else None,
         engine_displacement_cc=data.displacement_cc,
         body_type=data.body_type,
+        transmission=data.transmission,
         co2_original_g_km=round(data.co2_gkm) if data.co2_gkm is not None else None,
         co2_confidence=1.0 if data.co2_confirmed else 0.5 if data.co2_gkm is not None else 0.0,
         seller=Seller(type="private" if data.seller_type == "particular" else "dealer"),
     )
 
 
-async def calculate_for_customer(
+async def _calculate(
     data: PublicCalculationInput,
     *,
     market_service: SpanishMarketReferenceService,
-) -> PublicCalculationResult:
+    include_audit: bool,
+) -> PublicCalculationResult | AuditCalculationResult:
     """Return only customer-facing totals, explanations and risk warnings."""
 
     target = _market_target(data)
@@ -155,6 +175,10 @@ async def calculate_for_customer(
         valor_tablas_nuevo=resolution.value_eur if resolution else None,
         co2_confianza=1.0 if data.co2_confirmed else 0.5 if data.co2_gkm is not None else 0.0,
         carroceria=TipoCarroceria(data.body_type) if data.body_type else None,
+        boe_fila_id=resolution.row_id if resolution else None,
+        boe_orden=resolution.order_code if resolution else None,
+        boe_ejercicio=resolution.exercise if resolution else None,
+        boe_modelo_resuelto=resolution.model_type if resolution else None,
     )
     market_price = market.median_eur if market else None
     fees = float(os.getenv("IMPORT_CARS_MANAGEMENT_FEE", "900"))
@@ -186,13 +210,19 @@ async def calculate_for_customer(
         )
     if market_warning:
         warnings.append(market_warning)
+    if market and 0 < market.sample_size < 3:
+        warnings.append(
+            f"Comparación orientativa: solo hay {market.sample_size} "
+            f"{'comparable' if market.sample_size == 1 else 'comparables'} disponible"
+            ". Revisa los anuncios antes de valorar el ahorro como definitivo."
+        )
     if market_price is not None and data.purchase_price < market_price * 0.55:
         warnings.append(
             "El precio del anuncio es inusualmente bajo frente al mercado espanol. "
             "Conviene verificar historial, kilometraje, danos y documentacion."
         )
 
-    return PublicCalculationResult(
+    public_result = PublicCalculationResult(
         vehicle_label=(
             f"{' '.join(filter(None, [data.make, data.model, data.version]))} "
             f"· {data.first_registration.year}"
@@ -217,10 +247,91 @@ async def calculate_for_customer(
         fiscal_version=result.version_tablas,
         boe_model_match=resolution.model_type if resolution else None,
     )
+    if not include_audit:
+        return public_result
+
+    return AuditCalculationResult(
+        **public_result.model_dump(),
+        audit=CalculationAudit(
+            market={
+                "source": market.source if market else "coches_net",
+                "match_level": market.match_level if market else None,
+                "sample_size": market.sample_size if market else 0,
+                "average_eur": market.average_eur if market else None,
+                "median_eur": market.median_eur if market else None,
+                "minimum_eur": market.minimum_eur if market else None,
+                "maximum_eur": market.maximum_eur if market else None,
+                "confidence": market.confidence if market else "unavailable",
+                "cached": market.cached if market else False,
+                "quality_warning": (
+                    "Comparación orientativa: hay muy pocos comparables."
+                    if market and 0 < market.sample_size < 3
+                    else None
+                ),
+                "criteria": [
+                    criterion.model_dump(mode="json")
+                    for criterion in market.criteria
+                ] if market else [],
+                "comparables": [
+                    comparable.model_dump(mode="json")
+                    for comparable in market.comparables
+                ] if market else [],
+            },
+            fiscal_breakdown=[
+                FiscalAuditLine(
+                    key=line.clave,
+                    label=line.etiqueta,
+                    amount_eur=round(line.importe, 2),
+                    formula=line.formula,
+                    intermediates=[
+                        {
+                            "key": value.clave,
+                            "label": value.etiqueta,
+                            "value": value.valor,
+                            "unit": value.unidad,
+                            "note": value.nota,
+                        }
+                        for value in line.intermedios
+                    ],
+                )
+                for line in result.desglose_cliente
+            ],
+        ),
+    )
+
+
+async def calculate_for_customer(
+    data: PublicCalculationInput,
+    *,
+    market_service: SpanishMarketReferenceService,
+) -> PublicCalculationResult:
+    result = await _calculate(
+        data,
+        market_service=market_service,
+        include_audit=False,
+    )
+    assert isinstance(result, PublicCalculationResult)
+    return result
+
+
+async def calculate_for_audit(
+    data: PublicCalculationInput,
+    *,
+    market_service: SpanishMarketReferenceService,
+) -> AuditCalculationResult:
+    result = await _calculate(
+        data,
+        market_service=market_service,
+        include_audit=True,
+    )
+    assert isinstance(result, AuditCalculationResult)
+    return result
 
 
 __all__ = [
+    "AuditCalculationResult",
     "PublicCalculationInput",
     "PublicCalculationResult",
+    "calculate_for_audit",
     "calculate_for_customer",
 ]

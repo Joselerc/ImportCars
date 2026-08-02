@@ -112,6 +112,10 @@ def vehicle_from_listing(listing: NormalizedListing) -> Vehiculo:
         valor_tablas_nuevo=resolution.value_eur if resolution else None,
         co2_confianza=confidence,
         carroceria=TipoCarroceria(body_type) if body_type else None,
+        boe_fila_id=resolution.row_id if resolution else None,
+        boe_orden=resolution.order_code if resolution else None,
+        boe_ejercicio=resolution.exercise if resolution else None,
+        boe_modelo_resuelto=resolution.model_type if resolution else None,
     )
 
 

@@ -252,6 +252,13 @@ import-cars-web
 # http://127.0.0.1:8000/calculadora
 ```
 
+La superficie interna `/calculadora/auditoria` usa la misma protección HTTP
+Basic que el dashboard (`IMPORT_CARS_INTERNAL_USERNAME` y
+`IMPORT_CARS_INTERNAL_PASSWORD`; en localhost se permite acceso sin configurar
+credenciales). Muestra los comparables seleccionados con su anuncio, variables
+disponibles y criterios usados/no usados, además de los intermedios que devuelve
+el propio `fiscal_engine`. El endpoint público no serializa esta información.
+
 Las solicitudes de presupuesto con consentimiento se guardan en la tabla
 `public_leads` de la SQLite de actividad de clientes. Las fuentes del BOE y el
 seguimiento periódico de mercado usan bases físicamente separadas; consulta

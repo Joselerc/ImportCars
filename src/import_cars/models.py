@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import List, Optional
 
 from pydantic import BaseModel, Field, HttpUrl
 
@@ -13,54 +12,56 @@ class Price(BaseModel):
 
 class Registration(BaseModel):
     year: int
-    month: Optional[int] = None
+    month: int | None = None
 
 
 class Consumption(BaseModel):
-    combined: Optional[float] = None
-    urban: Optional[float] = None
-    highway: Optional[float] = None
+    combined: float | None = None
+    urban: float | None = None
+    highway: float | None = None
 
 
 class Location(BaseModel):
-    country_code: Optional[str] = Field(None, min_length=2, max_length=2)
-    region: Optional[str] = None
-    province: Optional[str] = None
-    city: Optional[str] = None
-    postal_code: Optional[str] = None
-    latitude: Optional[float] = None
-    longitude: Optional[float] = None
+    country_code: str | None = Field(None, min_length=2, max_length=2)
+    region: str | None = None
+    province: str | None = None
+    city: str | None = None
+    postal_code: str | None = None
+    latitude: float | None = None
+    longitude: float | None = None
 
 
 class Seller(BaseModel):
-    type: Optional[str] = Field(None, description="dealer | private | unknown")
-    name: Optional[str] = None
-    rating: Optional[float] = None
-    rating_count: Optional[int] = None
-    phone: Optional[str] = None
-    email: Optional[str] = None
-    vat_number: Optional[str] = None
-    dealer_id: Optional[str] = None
+    type: str | None = Field(None, description="dealer | private | unknown")
+    name: str | None = None
+    rating: float | None = None
+    rating_count: int | None = None
+    phone: str | None = None
+    email: str | None = None
+    vat_number: str | None = None
+    dealer_id: str | None = None
 
 
 class Financing(BaseModel):
     available: bool = False
-    amount: Optional[float] = None
-    rate: Optional[float] = None
-    duration_months: Optional[int] = None
+    amount: float | None = None
+    rate: float | None = None
+    duration_months: int | None = None
 
 
 class ListingMetadata(BaseModel):
-    advert_type: Optional[str] = None
-    vehicle_id: Optional[str] = None
-    price_history: Optional[List[dict]] = None
-    environment_badge: Optional[str] = None
-    hsn_tsn: Optional[str] = None
-    delivery_options: Optional[List[str]] = None
-    certified: Optional[bool] = None
-    publish_date: Optional[datetime] = None
-    update_date: Optional[datetime] = None
-    exportable: Optional[bool] = None
+    advert_type: str | None = None
+    vehicle_id: str | None = None
+    price_history: list[dict] | None = None
+    environment_badge: str | None = None
+    hsn_tsn: str | None = None
+    delivery_options: list[str] | None = None
+    certified: bool | None = None
+    publish_date: datetime | None = None
+    update_date: datetime | None = None
+    exportable: bool | None = None
+    # Dato observado en origen para auditoría; no participa en el matching.
+    source_transmission: str | None = None
 
 
 class NormalizedListing(BaseModel):
@@ -68,79 +69,79 @@ class NormalizedListing(BaseModel):
     source: str
     url: HttpUrl
     scraped_at: datetime
-    title: Optional[str] = None
-    make: Optional[str] = None
-    model: Optional[str] = None
-    version: Optional[str] = None
-    price_eur: Optional[float] = Field(None, description="Precio Bruto (Gross)")
-    price_net_eur: Optional[float] = Field(None, description="Precio Neto (Net)")
-    price_original: Optional[Price] = None
-    vat_deductible: Optional[bool] = None
-    mileage_km: Optional[int] = None
-    first_registration: Optional[Registration] = None
-    production_year: Optional[int] = None
-    fuel_type: Optional[str] = None
-    transmission: Optional[str] = None
-    power_hp: Optional[int] = None
-    power_kw: Optional[int] = None
-    engine_displacement_cc: Optional[int] = None
-    body_type: Optional[str] = None
-    doors: Optional[int] = None
-    seats: Optional[int] = None
-    color_exterior: Optional[str] = None
-    color_interior: Optional[str] = None
-    interior_material: Optional[str] = None
-    emission_class: Optional[str] = None
-    co2_emissions_g_km: Optional[int] = None
-    co2_original_g_km: Optional[int] = None
-    co2_inferred_g_km: Optional[int] = None
-    co2_source_type: Optional[str] = None
-    co2_confidence: Optional[float] = None
-    consumption_l_100km: Optional[Consumption] = None
-    features: List[str] = Field(default_factory=list)
-    description: Optional[str] = None
-    images: List[HttpUrl] = Field(default_factory=list)
-    location: Optional[Location] = None
-    seller: Optional[Seller] = None
-    warranty_months: Optional[int] = None
-    inspection_valid_until: Optional[datetime] = None
-    previous_owners: Optional[int] = None
-    service_history: Optional[bool] = None
-    accident_free: Optional[bool] = None
+    title: str | None = None
+    make: str | None = None
+    model: str | None = None
+    version: str | None = None
+    price_eur: float | None = Field(None, description="Precio Bruto (Gross)")
+    price_net_eur: float | None = Field(None, description="Precio Neto (Net)")
+    price_original: Price | None = None
+    vat_deductible: bool | None = None
+    mileage_km: int | None = None
+    first_registration: Registration | None = None
+    production_year: int | None = None
+    fuel_type: str | None = None
+    transmission: str | None = None
+    power_hp: int | None = None
+    power_kw: int | None = None
+    engine_displacement_cc: int | None = None
+    body_type: str | None = None
+    doors: int | None = None
+    seats: int | None = None
+    color_exterior: str | None = None
+    color_interior: str | None = None
+    interior_material: str | None = None
+    emission_class: str | None = None
+    co2_emissions_g_km: int | None = None
+    co2_original_g_km: int | None = None
+    co2_inferred_g_km: int | None = None
+    co2_source_type: str | None = None
+    co2_confidence: float | None = None
+    consumption_l_100km: Consumption | None = None
+    features: list[str] = Field(default_factory=list)
+    description: str | None = None
+    images: list[HttpUrl] = Field(default_factory=list)
+    location: Location | None = None
+    seller: Seller | None = None
+    warranty_months: int | None = None
+    inspection_valid_until: datetime | None = None
+    previous_owners: int | None = None
+    service_history: bool | None = None
+    accident_free: bool | None = None
     metadata: ListingMetadata = Field(default_factory=ListingMetadata)
-    vehicle_signature: Optional[str] = None
-    variant_key: Optional[str] = None
-    market_key: Optional[str] = None
-    comparable_match_level: Optional[str] = None
-    es_exact_sample_size: Optional[int] = None
-    es_near_sample_size: Optional[int] = None
-    es_broad_sample_size: Optional[int] = None
-    es_market_avg: Optional[float] = None
-    es_market_median: Optional[float] = None
-    es_market_min: Optional[float] = None
-    es_sample_size: Optional[int] = None
-    best_break_even: Optional[float] = None
-    potential_margin_avg: Optional[float] = None
-    potential_margin_min: Optional[float] = None
-    import_ready_score: Optional[float] = None
+    vehicle_signature: str | None = None
+    variant_key: str | None = None
+    market_key: str | None = None
+    comparable_match_level: str | None = None
+    es_exact_sample_size: int | None = None
+    es_near_sample_size: int | None = None
+    es_broad_sample_size: int | None = None
+    es_market_avg: float | None = None
+    es_market_median: float | None = None
+    es_market_min: float | None = None
+    es_sample_size: int | None = None
+    best_break_even: float | None = None
+    potential_margin_avg: float | None = None
+    potential_margin_min: float | None = None
+    import_ready_score: float | None = None
 
 
 class SearchResult(BaseModel):
-    listings: List[NormalizedListing]
-    total_listings: Optional[int] = None
-    result_page: Optional[int] = None
-    result_page_size: Optional[int] = None
-    has_next: Optional[bool] = None
+    listings: list[NormalizedListing]
+    total_listings: int | None = None
+    result_page: int | None = None
+    result_page_size: int | None = None
+    has_next: bool | None = None
 
 
 __all__ = [
-    "Price",
-    "Registration",
     "Consumption",
-    "Location",
-    "Seller",
     "Financing",
     "ListingMetadata",
+    "Location",
     "NormalizedListing",
+    "Price",
+    "Registration",
     "SearchResult",
+    "Seller",
 ]

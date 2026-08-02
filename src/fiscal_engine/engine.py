@@ -18,7 +18,7 @@ Las fórmulas implementan:
 
 from __future__ import annotations
 
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from datetime import date
 
 from . import tablas as T
@@ -31,6 +31,7 @@ from .models import (
     ResultadoFiscal,
     TipoCarroceria,
     TipoVendedor,
+    ValorIntermedio,
     Vehiculo,
 )
 
@@ -57,6 +58,41 @@ def coeficiente_depreciacion(anios: float) -> float:
     return T.DEPRECIACION_SUELO
 
 
+@dataclass(frozen=True)
+class _DetalleValorMercado:
+    antiguedad_anios: float
+    coeficiente_depreciacion: float
+    valor_nuevo_aplicado: float
+    valor_depreciado: float
+    valor_boe_disponible: bool
+    reduccion_uso_profesional: float
+
+
+def _calcular_valor_mercado_detalle(
+    vehiculo: Vehiculo,
+    referencia: date | None = None,
+    uso_profesional: bool = False,
+) -> _DetalleValorMercado:
+    """Resuelve una vez el valor de mercado y conserva sus términos."""
+
+    anios = antiguedad_anios(vehiculo.fecha_primera_matriculacion, referencia)
+    coef = coeficiente_depreciacion(anios)
+    base_nuevo = vehiculo.valor_tablas_nuevo
+    valor_boe_disponible = base_nuevo is not None
+    if base_nuevo is None:
+        base_nuevo = vehiculo.precio_compra / coef if coef > 0 else vehiculo.precio_compra
+    reduccion = T.REDUCCION_USO_PROFESIONAL if uso_profesional else 1.0
+    vm = base_nuevo * coef * reduccion
+    return _DetalleValorMercado(
+        antiguedad_anios=anios,
+        coeficiente_depreciacion=coef,
+        valor_nuevo_aplicado=base_nuevo,
+        valor_depreciado=vm,
+        valor_boe_disponible=valor_boe_disponible,
+        reduccion_uso_profesional=reduccion,
+    )
+
+
 def valor_mercado(vehiculo: Vehiculo, referencia: date | None = None,
                   uso_profesional: bool = False) -> float:
     """Valor de mercado = valor_tablas_nuevo x coef_depreciacion.
@@ -65,16 +101,9 @@ def valor_mercado(vehiculo: Vehiculo, referencia: date | None = None,
     (data/import_cars.sqlite3). Si no se aporta, se usa el precio de compra
     como aproximación conservadora (y se deja un aviso en el resultado).
     """
-    anios = antiguedad_anios(vehiculo.fecha_primera_matriculacion, referencia)
-    coef = coeficiente_depreciacion(anios)
-    base_nuevo = vehiculo.valor_tablas_nuevo
-    if base_nuevo is None:
-        # Fallback: sin tabla, el mejor proxy disponible es el precio pagado.
-        base_nuevo = vehiculo.precio_compra / coef if coef > 0 else vehiculo.precio_compra
-    vm = base_nuevo * coef
-    if uso_profesional:
-        vm *= T.REDUCCION_USO_PROFESIONAL
-    return vm
+    return _calcular_valor_mercado_detalle(
+        vehiculo, referencia, uso_profesional
+    ).valor_depreciado
 
 
 # --------------------------------------------------------------------------- #
@@ -210,6 +239,28 @@ def calcular_ivtm_primer_anio(vehiculo: Vehiculo, operacion: Operacion,
     El alta se produce al matricular; el primer año se prorratea por los
     trimestres naturales que restan (incluido el de alta).
     """
+    return _calcular_ivtm_detalle(vehiculo, operacion, referencia).cuota
+
+
+@dataclass(frozen=True)
+class _DetalleIvtm:
+    cvf: float
+    cvf_estimado: bool
+    tarifa_base: float
+    coeficiente_municipal: float
+    cuota_anual: float
+    trimestre_alta: int
+    trimestres_restantes: int
+    cuota: float
+
+
+def _calcular_ivtm_detalle(
+    vehiculo: Vehiculo,
+    operacion: Operacion,
+    referencia: date | None = None,
+) -> _DetalleIvtm:
+    """Calcula una sola vez la cuota y todos sus términos auditables."""
+
     ref = referencia or date.today()
     cvf = potencia_fiscal_cvf(vehiculo)
     base = tarifa_ivtm(cvf)
@@ -219,7 +270,17 @@ def calcular_ivtm_primer_anio(vehiculo: Vehiculo, operacion: Operacion,
     # Prorrateo por trimestres restantes (1..4).
     trimestre_alta = (ref.month - 1) // 3 + 1
     trimestres_restantes = 4 - trimestre_alta + 1
-    return cuota_anual * trimestres_restantes / 4.0
+    cuota = cuota_anual * trimestres_restantes / 4.0
+    return _DetalleIvtm(
+        cvf=cvf,
+        cvf_estimado=vehiculo.cvf is None,
+        tarifa_base=base,
+        coeficiente_municipal=coef,
+        cuota_anual=cuota_anual,
+        trimestre_alta=trimestre_alta,
+        trimestres_restantes=trimestres_restantes,
+        cuota=cuota,
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -252,6 +313,18 @@ def _nota_transporte(vehiculo: Vehiculo, costes: CostesConfig) -> str:
         return "Estimación para turismo estándar"
     return "Estimación conservadora cuando la carrocería no está confirmada"
 
+
+@dataclass(frozen=True)
+class _ContextoAuditoria:
+    valor_mercado: _DetalleValorMercado
+    iva_historico: float
+    iedmt_historico: float
+    tipo_iedmt_estatal: float
+    recargo_iedmt_autonomico: float
+    ivtm: _DetalleIvtm
+    condicion_fiscal: CondicionFiscal
+
+
 def calcular(vehiculo: Vehiculo,
              operacion: Operacion,
              costes: CostesConfig | None = None,
@@ -267,7 +340,10 @@ def calcular(vehiculo: Vehiculo,
     avisos: list[str] = []
     transporte = estimar_coste_transporte(vehiculo, costes)
 
-    vm = valor_mercado(vehiculo, referencia, uso_profesional)
+    detalle_vm = _calcular_valor_mercado_detalle(
+        vehiculo, referencia, uso_profesional
+    )
+    vm = detalle_vm.valor_depreciado
     if vehiculo.valor_tablas_nuevo is None:
         avisos.append(
             "Valor de tablas del BOE no aportado: se ha estimado a partir del "
@@ -279,7 +355,18 @@ def calcular(vehiculo: Vehiculo,
     base_iedmt, tipo_iedmt, iedmt = calcular_iedmt(vehiculo, operacion, vm)
     base_itp, tipo_itp, itp = calcular_itp(vehiculo, operacion, vm)
     iva = calcular_iva(vehiculo, operacion, condicion)
-    ivtm = calcular_ivtm_primer_anio(vehiculo, operacion, referencia)
+    detalle_ivtm = _calcular_ivtm_detalle(vehiculo, operacion, referencia)
+    ivtm = detalle_ivtm.cuota
+    ccaa = T.normaliza_ccaa(operacion.comunidad_autonoma)
+    auditoria = _ContextoAuditoria(
+        valor_mercado=detalle_vm,
+        iva_historico=_iva_historico(vehiculo.fecha_primera_matriculacion),
+        iedmt_historico=tipo_iedmt_estatal(vehiculo.co2_gkm),
+        tipo_iedmt_estatal=tipo_iedmt_estatal(vehiculo.co2_gkm),
+        recargo_iedmt_autonomico=T.RECARGO_IEDMT_CCAA.get(ccaa, 0.0),
+        ivtm=detalle_ivtm,
+        condicion_fiscal=condicion,
+    )
 
     # Avisos de riesgo/confianza.
     if vehiculo.co2_gkm is None:
@@ -321,8 +408,8 @@ def calcular(vehiculo: Vehiculo,
     )
 
     desglose = _construir_desglose(
-        vehiculo, operacion, costes, transporte, iedmt, tipo_iedmt, itp, tipo_itp,
-        iva, ivtm, otros,
+        vehiculo, operacion, costes, transporte, base_iedmt, iedmt, tipo_iedmt,
+        base_itp, itp, tipo_itp, iva, ivtm, otros, auditoria,
     )
 
     resultado = ResultadoFiscal(
@@ -362,36 +449,221 @@ def _aviso_frontera_co2(co2: float | None, avisos: list[str]) -> None:
             break
 
 
-def _construir_desglose(vehiculo, operacion, costes, transporte, iedmt, tipo_iedmt,
-                        itp, tipo_itp, iva, ivtm, otros) -> list[LineaCoste]:
+def _construir_desglose(
+    vehiculo,
+    operacion,
+    costes,
+    transporte,
+    base_iedmt,
+    iedmt,
+    tipo_iedmt,
+    base_itp,
+    itp,
+    tipo_itp,
+    iva,
+    ivtm,
+    otros,
+    auditoria: _ContextoAuditoria,
+) -> list[LineaCoste]:
+    vm = auditoria.valor_mercado
     lineas = [
-        LineaCoste("precio", "Precio del coche", vehiculo.precio_compra),
+        LineaCoste(
+            "precio",
+            "Precio del coche",
+            vehiculo.precio_compra,
+            formula="Precio de compra declarado en el anuncio",
+            intermedios=[
+                ValorIntermedio(
+                    "precio_compra",
+                    "Precio de compra",
+                    vehiculo.precio_compra,
+                    "EUR",
+                )
+            ],
+        ),
         LineaCoste(
             "transporte",
             "Transporte profesional a España",
             transporte,
             nota=_nota_transporte(vehiculo, costes),
+            formula="Tramo operativo según la carrocería declarada",
+            intermedios=[
+                ValorIntermedio(
+                    "carroceria",
+                    "Carrocería utilizada",
+                    vehiculo.carroceria.value if vehiculo.carroceria else "no confirmada",
+                ),
+                ValorIntermedio("transporte", "Coste aplicado", transporte, "EUR"),
+            ],
         ),
         LineaCoste(
             "iedmt", "Impuesto de matriculación (IEDMT)", iedmt,
             nota=(f"{vehiculo.co2_gkm:.0f} g/km CO2 -> {tipo_iedmt*100:.2f}%"
                   if vehiculo.co2_gkm is not None
                   else "CO2 sin acreditar -> tipo máximo"),
+            formula=(
+                "[valor BOE × coeficiente de depreciación] ÷ "
+                "[1 + IVA histórico + IEDMT histórico] × tipo IEDMT aplicable"
+            ),
+            intermedios=[
+                ValorIntermedio(
+                    "boe_fila_id", "ID de la fila del BOE", vehiculo.boe_fila_id
+                ),
+                ValorIntermedio(
+                    "boe_orden", "Orden del BOE", vehiculo.boe_orden or T.VERSION_TABLAS
+                ),
+                ValorIntermedio(
+                    "boe_ejercicio", "Ejercicio de la tabla", vehiculo.boe_ejercicio
+                ),
+                ValorIntermedio(
+                    "boe_modelo", "Modelo resuelto en el BOE", vehiculo.boe_modelo_resuelto
+                ),
+                ValorIntermedio(
+                    "valor_tablas_nuevo",
+                    "Valor oficial como nuevo",
+                    vm.valor_nuevo_aplicado,
+                    "EUR",
+                    "Valor oficial" if vm.valor_boe_disponible else "Fallback desde el precio de compra",
+                ),
+                ValorIntermedio(
+                    "antiguedad",
+                    "Antigüedad en la fecha del cálculo",
+                    vm.antiguedad_anios,
+                    "años",
+                ),
+                ValorIntermedio(
+                    "coeficiente_depreciacion",
+                    "Coeficiente de depreciación",
+                    vm.coeficiente_depreciacion * 100,
+                    "%",
+                ),
+                ValorIntermedio(
+                    "valor_tablas_depreciado",
+                    "Valor de tablas depreciado",
+                    vm.valor_depreciado,
+                    "EUR",
+                ),
+                ValorIntermedio(
+                    "iva_historico",
+                    "IVA histórico del denominador",
+                    auditoria.iva_historico * 100,
+                    "%",
+                ),
+                ValorIntermedio(
+                    "iedmt_historico",
+                    "IEDMT histórico del denominador",
+                    auditoria.iedmt_historico * 100,
+                    "%",
+                ),
+                ValorIntermedio(
+                    "denominador_minoracion",
+                    "Denominador de minoración",
+                    1 + auditoria.iva_historico + auditoria.iedmt_historico,
+                ),
+                ValorIntermedio(
+                    "base_iedmt", "Base tras minoración", base_iedmt, "EUR"
+                ),
+                ValorIntermedio(
+                    "tipo_iedmt_estatal",
+                    "Tipo estatal por CO₂",
+                    auditoria.tipo_iedmt_estatal * 100,
+                    "%",
+                ),
+                ValorIntermedio(
+                    "recargo_autonomico",
+                    "Recargo autonómico sobre el tipo",
+                    auditoria.recargo_iedmt_autonomico * 100,
+                    "%",
+                    operacion.comunidad_autonoma,
+                ),
+                ValorIntermedio(
+                    "tipo_iedmt_aplicado", "Tipo efectivo aplicado", tipo_iedmt * 100, "%"
+                ),
+                ValorIntermedio("cuota_iedmt", "Cuota resultante", iedmt, "EUR"),
+            ],
         ),
     ]
     if itp > 0:
         lineas.append(LineaCoste(
             "itp", "Impuesto de transmisiones (ITP)", itp,
             nota=f"Compra a particular · {operacion.comunidad_autonoma} · {tipo_itp*100:.0f}%",
+            formula="máx.[precio de compra, valor de tablas depreciado] × tipo de la comunidad autónoma",
+            intermedios=[
+                ValorIntermedio("precio_compra", "Precio de compra", vehiculo.precio_compra, "EUR"),
+                ValorIntermedio(
+                    "valor_tablas_depreciado",
+                    "Valor de tablas depreciado",
+                    vm.valor_depreciado,
+                    "EUR",
+                ),
+                ValorIntermedio(
+                    "base_itp",
+                    "Base seleccionada",
+                    base_itp,
+                    "EUR",
+                    "El mayor de los dos valores",
+                ),
+                ValorIntermedio("tipo_itp", "Tipo de ITP", tipo_itp * 100, "%", operacion.comunidad_autonoma),
+                ValorIntermedio("cuota_itp", "Cuota resultante", itp, "EUR"),
+            ],
         ))
     if iva > 0:
-        lineas.append(LineaCoste("iva", "IVA (vehículo nuevo)", iva, nota="21%"))
+        lineas.append(LineaCoste(
+            "iva",
+            "IVA (vehículo nuevo)",
+            iva,
+            nota="21%",
+            formula="precio de compra × tipo de IVA español",
+            intermedios=[
+                ValorIntermedio(
+                    "condicion_fiscal",
+                    "Condición fiscal",
+                    auditoria.condicion_fiscal.value,
+                ),
+                ValorIntermedio("base_iva", "Base del IVA", vehiculo.precio_compra, "EUR"),
+                ValorIntermedio("tipo_iva", "Tipo de IVA", T.IVA_ESPANA * 100, "%"),
+                ValorIntermedio("cuota_iva", "Cuota resultante", iva, "EUR"),
+            ],
+        ))
     lineas.append(LineaCoste(
         "admin", "ITV, tasas de la DGT y placas",
         costes.itv_importacion + costes.tasa_dgt + costes.placas,
+        formula="ITV de importación + tasa de la DGT + placas",
+        intermedios=[
+            ValorIntermedio("itv", "ITV de importación", costes.itv_importacion, "EUR"),
+            ValorIntermedio("tasa_dgt", "Tasa de la DGT", costes.tasa_dgt, "EUR"),
+            ValorIntermedio("placas", "Placas", costes.placas, "EUR"),
+        ],
     ))
     lineas.append(LineaCoste(
         "ivtm", "Impuesto de circulación (1er año, prorrateado)", ivtm,
+        formula="tarifa base por CVF × coeficiente municipal × trimestres restantes ÷ 4",
+        intermedios=[
+            ValorIntermedio(
+                "cvf",
+                "Potencia fiscal utilizada",
+                auditoria.ivtm.cvf,
+                "CVF",
+                "Estimada desde la cilindrada" if auditoria.ivtm.cvf_estimado else "Aportada por la ficha o la fila del BOE",
+            ),
+            ValorIntermedio("tarifa_base", "Tarifa base del tramo", auditoria.ivtm.tarifa_base, "EUR/año"),
+            ValorIntermedio(
+                "coeficiente_municipal",
+                "Coeficiente municipal",
+                auditoria.ivtm.coeficiente_municipal,
+                "×",
+                operacion.municipio,
+            ),
+            ValorIntermedio("cuota_anual", "Cuota anual", auditoria.ivtm.cuota_anual, "EUR"),
+            ValorIntermedio("trimestre_alta", "Trimestre de alta", auditoria.ivtm.trimestre_alta),
+            ValorIntermedio(
+                "trimestres_restantes",
+                "Trimestres incluidos",
+                auditoria.ivtm.trimestres_restantes,
+                "de 4",
+            ),
+            ValorIntermedio("cuota_ivtm", "Cuota prorrateada", ivtm, "EUR"),
+        ],
     ))
     if otros > 0:
         lineas.append(LineaCoste("otros", "Otros costes (CoC, aduana, traducción)", otros))

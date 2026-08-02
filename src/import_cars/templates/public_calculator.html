@@ -221,6 +221,44 @@ nav{
 .bd-sub{padding:14px 26px;background:#FAFBF9;font-size:12.5px;color:var(--ink-faint);display:flex;gap:8px;align-items:flex-start}
 .bd-sub svg{width:15px;height:15px;stroke:var(--ink-faint);fill:none;stroke-width:1.6;flex-shrink:0;margin-top:1px}
 
+/* internal audit mode */
+.audit-banner{margin-bottom:24px;padding:14px 18px;border:1px solid #d7c29b;background:#fff8e9;border-radius:11px;display:flex;justify-content:space-between;gap:18px;align-items:center;font-size:13px;color:#654817}
+.audit-banner strong{font-family:'Space Mono';font-size:12px;text-transform:uppercase;letter-spacing:.05em}
+.audit-breakdown{display:block;padding:0}
+.audit-breakdown>summary{list-style:none;display:flex;align-items:center;justify-content:space-between;padding:15px 26px;cursor:pointer;gap:18px}
+.audit-breakdown>summary::-webkit-details-marker{display:none}
+.audit-breakdown>summary::after{content:"+";font-family:'Space Mono';color:var(--amber-deep);margin-left:4px}
+.audit-breakdown[open]>summary::after{content:"−"}
+.audit-breakdown .bd-val{margin-left:auto}
+.audit-line-detail{padding:0 26px 20px;border-top:1px dashed var(--line);background:#fafaf8}
+.audit-formula{padding:16px 0 12px;font-family:'Space Mono';font-size:12px;color:var(--ink);line-height:1.55}
+.audit-values{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px 18px}
+.audit-value{display:flex;justify-content:space-between;gap:16px;border-bottom:1px solid #eceee9;padding:8px 0;font-size:12.5px}
+.audit-value span{color:var(--muted)}.audit-value strong{text-align:right;font-family:'Space Mono';font-size:12px}
+.audit-value small{display:block;color:var(--ink-faint);font-family:'Inter';font-weight:400}
+.audit-panel{margin-top:26px;background:#171b20;color:#eef0f2;border-radius:var(--radius);padding:28px;box-shadow:var(--shadow)}
+.audit-panel h3{font-size:20px;margin-bottom:5px}.audit-intro{color:#9fa7b0;font-size:13px;margin-bottom:22px}
+.audit-summary{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:20px}
+.audit-stat{background:#22272e;border:1px solid #343b44;border-radius:10px;padding:14px}
+.audit-stat span{display:block;color:#9099a4;font-size:11px;margin-bottom:4px}.audit-stat strong{font-family:'Space Mono';font-size:15px}
+.audit-warning{padding:12px 14px;border:1px solid #806326;background:#2d281c;color:#f1c971;border-radius:9px;font-size:13px;margin-bottom:18px}
+.audit-panel details{border:1px solid #343b44;border-radius:10px;background:#1d2228;margin-top:10px;overflow:hidden}
+.audit-panel details>summary{list-style:none;cursor:pointer;padding:15px 17px;display:flex;justify-content:space-between;align-items:center;gap:16px}
+.audit-panel details>summary::-webkit-details-marker{display:none}
+.audit-panel details>summary::after{content:"+";color:var(--amber);font-family:'Space Mono'}
+.audit-panel details[open]>summary::after{content:"−"}
+.audit-detail-body{padding:0 17px 17px;border-top:1px solid #343b44}
+.criteria-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px;margin-top:14px}
+.criterion{border:1px solid #343b44;border-radius:8px;padding:11px;font-size:12px}
+.criterion-head{display:flex;justify-content:space-between;gap:8px;margin-bottom:5px}.criterion p{color:#aeb5bd;line-height:1.45}.criterion code{color:#fff}
+.status-chip{font-family:'Space Mono';font-size:9px;text-transform:uppercase;border-radius:99px;padding:2px 7px;white-space:nowrap}
+.status-used{color:#6bd7a5;background:#18382c}.status-not_used{color:#f2c56d;background:#3b301b}.status-unavailable{color:#c4c9ce;background:#343940}
+.comparable-head{min-width:0}.comparable-head strong{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.comparable-head span{font-size:12px;color:#9fa7b0}
+.comparable-facts{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px;margin:14px 0}
+.comparable-fact{background:#252b32;border-radius:7px;padding:9px;font-size:11px;color:#9fa7b0}.comparable-fact strong{display:block;color:#fff;font-family:'Space Mono';font-size:12px;margin-top:2px;overflow-wrap:anywhere}
+.comparable-link{display:inline-flex;color:#f1b14f;font-size:12px;margin:8px 0 2px}.audit-checks{font-size:11.5px;color:#aeb5bd;margin-top:10px;line-height:1.6}
+@media(max-width:720px){.audit-banner{align-items:flex-start;flex-direction:column}.audit-summary{grid-template-columns:1fr 1fr}.criteria-grid,.audit-values{grid-template-columns:1fr}.comparable-facts{grid-template-columns:1fr 1fr}.audit-breakdown>summary{padding:14px 18px}.audit-line-detail{padding:0 18px 18px}}
+
 /* lead capture */
 .lead{
   margin-top:26px;background:linear-gradient(135deg,#1D2126,#2A2F36);
@@ -325,6 +363,7 @@ footer{border-top:1px solid var(--line);padding:40px 0;margin-top:40px}
 
 <header class="hero">
   <div class="wrap">
+    {% if audit_mode %}<div class="audit-banner"><strong>Modo auditoría interno</strong><span>Esta superficie expone comparables y trazas fiscales. Está protegida y no forma parte de la experiencia del cliente.</span></div>{% endif %}
     <div class="eyebrow"><span class="dot"></span> Precio final, sin sorpresas</div>
     <h1>Cuánto te cuesta <em>de verdad</em> traer tu coche de Alemania.</h1>
     <p class="lead">Pega el enlace del anuncio y te decimos el precio final —matriculado, con impuestos y a tu nombre en España— y cuánto te ahorras frente a comprarlo aquí.</p>
@@ -374,9 +413,10 @@ footer{border-top:1px solid var(--line);padding:40px 0;margin-top:40px}
             <div class="field"><label for="m_cc">Cilindrada <span class="opt">(cc)</span></label><input id="m_cc" type="number" min="0" value="1984"></div>
             <div class="field"><label for="m_kw">Potencia <span class="opt">(kW)</span></label><input id="m_kw" type="number" min="0" value="180"></div>
           </div>
-          <div class="grid" style="margin-top:16px">
+          <div class="{{ 'grid-3' if audit_mode else 'grid' }}" style="margin-top:16px">
             <div class="field"><label for="m_km">Kilómetros</label><input id="m_km" type="number" min="0" value="60000"></div>
             <div class="field"><label for="m_body">Carrocería</label><select id="m_body"><option value="">No lo sé</option><option value="turismo" selected>Turismo</option><option value="familiar">Familiar</option><option value="suv">SUV</option><option value="monovolumen">Monovolumen</option><option value="deportivo_gama_alta">Deportivo o gama alta</option><option value="otro">Otra</option></select></div>
+            {% if audit_mode %}<div class="field"><label for="m_transmission">Cambio <span class="opt">(para observar; aún no filtra)</span></label><select id="m_transmission"><option value="">No consta</option><option value="manual">Manual</option><option value="automatic">Automático</option><option value="semi_automatic">Semiautomático</option></select></div>{% endif %}
           </div>
           <div class="grid" style="margin-top:16px">
             <div class="field"><label for="m_seller">Vendedor</label><select id="m_seller"><option value="particular">Particular</option><option value="profesional_iva">Profesional · IVA desglosado</option><option value="profesional_margen">Profesional · IVA no desglosado</option></select></div>
@@ -390,6 +430,7 @@ footer{border-top:1px solid var(--line);padding:40px 0;margin-top:40px}
           <div class="calc-status" id="manual-status" aria-live="polite"></div>
         </div>
       </div>
+
     </div>
 
     <div class="trust-row">
@@ -426,6 +467,20 @@ footer{border-top:1px solid var(--line);padding:40px 0;margin-top:40px}
           <span id="b_disclaimer">Cálculo orientativo según las tablas oficiales de Hacienda (Orden HAC/1501/2025). El presupuesto formal confirma cada cifra al céntimo antes de que decidas.</span>
         </div>
       </div>
+
+      {% if audit_mode %}
+      <section class="audit-panel" id="audit-market" aria-label="Auditoría de comparables" hidden>
+        <h3>Auditoría de la referencia española</h3>
+        <p class="audit-intro">Fotografía exacta de los anuncios que produjeron el precio de mercado. Esta vista describe la política actual; no la modifica.</p>
+        <div class="audit-summary" id="audit-summary"></div>
+        <div class="audit-warning" id="audit-warning" hidden></div>
+        <details open>
+          <summary><strong>Criterios de match aplicados</strong></summary>
+          <div class="audit-detail-body"><div class="criteria-grid" id="audit-criteria"></div></div>
+        </details>
+        <div id="audit-comparables"></div>
+      </section>
+      {% endif %}
 
       <div class="risk-box" id="risk-box" role="status" aria-live="polite" hidden>
         <h3>Antes de comprar, revisa esto</h3>
@@ -534,7 +589,9 @@ footer{border-top:1px solid var(--line);padding:40px 0;margin-top:40px}
 <script>
 window.PUBLIC_CALCULATOR_CONFIG = {
   managementFee: {{ management_fee | tojson }},
-  whatsappNumber: {{ whatsapp_number | tojson }}
+  whatsappNumber: {{ whatsapp_number | tojson }},
+  auditMode: {{ audit_mode | tojson }},
+  calculationEndpoint: {{ ('/api/internal/calculate-audit' if audit_mode else '/api/public/calculate') | tojson }}
 };
 </script>
 <script src="{{ url_for('static', path='public-calculator.js') }}"></script>

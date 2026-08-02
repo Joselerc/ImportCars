@@ -20,12 +20,13 @@ from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, HttpUrl, model_validator
 
 from .enrichment.body_type import normalize_body_type
-from .enrichment.signature import normalize_fuel_category
+from .enrichment.signature import normalize_fuel_category, normalize_text
 from .services import (
     ListingParseError,
     PublicCalculationInput,
     PublicLeadInput,
     SpanishMarketReferenceService,
+    calculate_for_audit,
     calculate_for_customer,
     parse_listing_url,
     save_public_lead,
@@ -635,6 +636,17 @@ def _page_context(
     }
 
 
+def _normalized_transmission(value: str | None) -> str | None:
+    normalized = normalize_text(value)
+    if normalized in {"automatic", "automatico", "automatik"}:
+        return "automatic"
+    if normalized in {"manual", "cambio_manual", "schaltgetriebe"}:
+        return "manual"
+    if normalized in {"semi_automatic", "semiautomatico"}:
+        return "semi_automatic"
+    return None
+
+
 def _parsed_listing_payload(listing) -> dict:
     registration = listing.first_registration
     first_registration = None
@@ -672,6 +684,7 @@ def _parsed_listing_payload(listing) -> dict:
         "mileage_km": listing.mileage_km,
         "power_kw": listing.power_kw,
         "body_type": normalize_body_type(listing.body_type),
+        "transmission": _normalized_transmission(listing.transmission),
         "seller_type": seller_type,
         "vat_deductible": listing.vat_deductible,
         "co2_confirmed": listing.co2_original_g_km is not None,
@@ -755,6 +768,24 @@ async def calculator(request: Request):
             "request": request,
             "management_fee": float(os.getenv("IMPORT_CARS_MANAGEMENT_FEE", "900")),
             "whatsapp_number": os.getenv("IMPORT_CARS_WHATSAPP_NUMBER", ""),
+            "audit_mode": False,
+        },
+    )
+
+
+@app.get("/calculadora/auditoria", response_class=HTMLResponse)
+async def audit_calculator(
+    request: Request,
+    _access: None = Depends(_require_internal_access),
+):
+    return templates.TemplateResponse(
+        request,
+        "public_calculator.html",
+        {
+            "request": request,
+            "management_fee": float(os.getenv("IMPORT_CARS_MANAGEMENT_FEE", "900")),
+            "whatsapp_number": os.getenv("IMPORT_CARS_WHATSAPP_NUMBER", ""),
+            "audit_mode": True,
         },
     )
 
@@ -824,6 +855,19 @@ async def public_calculator_api(
     _rate_limit: None = Depends(calculator_rate_limit),
 ) -> dict:
     result = await calculate_for_customer(
+        request,
+        market_service=market_reference_service,
+    )
+    return result.model_dump(mode="json")
+
+
+@app.post("/api/internal/calculate-audit")
+async def audit_calculator_api(
+    request: PublicCalculationInput,
+    _access: None = Depends(_require_internal_access),
+    _rate_limit: None = Depends(calculator_rate_limit),
+) -> dict:
+    result = await calculate_for_audit(
         request,
         market_service=market_reference_service,
     )

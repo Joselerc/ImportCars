@@ -13,6 +13,8 @@ def listing(
     title: str,
     price: float,
     power_hp: int = 265,
+    mileage_km: int = 60_000,
+    transmission: str | None = "automatic",
 ) -> NormalizedListing:
     return NormalizedListing(
         listing_id=listing_id,
@@ -25,6 +27,8 @@ def listing(
         price_eur=price,
         first_registration=Registration(year=2020, month=6),
         fuel_type="diesel",
+        mileage_km=mileage_km,
+        transmission=transmission,
         power_hp=power_hp,
         engine_displacement_cc=2_993,
     )
@@ -35,7 +39,13 @@ async def test_market_reference_prefers_exact_matches_and_uses_short_cache() -> 
     calls = 0
     candidates = [
         listing("es-1", source="coches_net", title="BMW X5 xDrive30d", price=40_000),
-        listing("es-2", source="coches_net", title="BMW X5 xDrive30d", price=42_000),
+        listing(
+            "es-2",
+            source="coches_net",
+            title="BMW X5 xDrive30d",
+            price=42_000,
+            transmission=None,
+        ),
         listing(
             "es-wrong-version",
             source="coches_net",
@@ -72,6 +82,22 @@ async def test_market_reference_prefers_exact_matches_and_uses_short_cache() -> 
     assert first.sample_size == 2
     assert first.median_eur == 41_000
     assert first.confidence == "high"
+    assert [item.listing_id for item in first.comparables] == ["es-1", "es-2"]
+    assert first.comparables[0].mileage_km == 60_000
+    assert first.comparables[0].year == 2020
+    assert first.comparables[0].fuel == "diesel"
+    assert first.comparables[0].transmission == "automatic"
+    assert first.comparables[0].url.endswith("/es-1")
+    criteria = {item.key: item for item in first.criteria}
+    assert criteria["fuel"].status == "used"
+    assert criteria["mileage"].status == "not_used"
+    assert criteria["transmission"].status == "not_used"
+    checks = {item.key: item for item in first.comparables[0].checks}
+    assert checks["mileage"].status == "not_used"
+    assert checks["transmission"].status == "not_used"
+    missing_checks = {item.key: item for item in first.comparables[1].checks}
+    assert missing_checks["transmission"].status == "unavailable"
+    assert "falta el dato" in missing_checks["transmission"].note
     assert first.cached is False
     assert second.cached is True
     assert calls == 1
