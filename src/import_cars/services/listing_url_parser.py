@@ -76,6 +76,17 @@ def _registration(value) -> Registration | None:
     return Registration(year=int(match.group(2)), month=month)
 
 
+def _mobile_listing_id(url: str) -> str | None:
+    """Extract a mobile.de vehicle id from query or canonical ad path."""
+
+    parsed = urlparse(url)
+    query_id = (parse_qs(parsed.query).get("id") or [None])[0]
+    if query_id and query_id.isdigit():
+        return query_id
+    path_match = re.search(r"/auto-inserat/(?:[^/]+/)*(\d+)\.html$", parsed.path)
+    return path_match.group(1) if path_match else None
+
+
 def _parse_autoscout_html(html: str, url: str) -> NormalizedListing:
     tree = HTMLParser(html)
     candidates = []
@@ -166,8 +177,8 @@ def parse_listing_url(url: str) -> NormalizedListing:
         raise ListingParseError("Solo se admiten enlaces HTTPS de mobile.de o AutoScout24")
     source = _ALLOWED_HOSTS[parsed.hostname]
     if source == "mobile":
-        listing_id = (parse_qs(parsed.query).get("id") or [None])[0]
-        if not listing_id or not listing_id.isdigit():
+        listing_id = _mobile_listing_id(url)
+        if listing_id is None:
             raise ListingParseError("El enlace de mobile.de no contiene un identificador valido")
         listing = MobileDeHttpScraper().get_listing(listing_id)
         if listing is None:

@@ -2,6 +2,7 @@ from pathlib import Path
 
 import pytest
 
+from import_cars.scrapers.mobile_de_http import MobileDeHttpScraper
 from import_cars.services.listing_url_parser import (
     ListingParseError,
     _parse_autoscout_html,
@@ -40,3 +41,32 @@ def test_parses_autoscout_structured_data_fixture() -> None:
 def test_rejects_unsafe_or_incomplete_urls_without_network(url: str) -> None:
     with pytest.raises(ListingParseError):
         parse_listing_url(url)
+
+
+@pytest.mark.parametrize(
+    ("url", "expected_id"),
+    [
+        (
+            "https://suchen.mobile.de/fahrzeuge/details.html?id=454069619",
+            "454069619",
+        ),
+        (
+            "https://suchen.mobile.de/auto-inserat/peugeot-5008-e-5008-gt-elektromotor-210-jena-lobeda/460350611.html",
+            "460350611",
+        ),
+    ],
+)
+def test_mobile_listing_id_supports_query_and_auto_inserat_paths(
+    monkeypatch, url: str, expected_id: str
+) -> None:
+    captured = []
+    sentinel = object()
+
+    def fake_get_listing(_self, listing_id: str):
+        captured.append(listing_id)
+        return sentinel
+
+    monkeypatch.setattr(MobileDeHttpScraper, "get_listing", fake_get_listing)
+
+    assert parse_listing_url(url) is sentinel
+    assert captured == [expected_id]
