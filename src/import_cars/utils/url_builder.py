@@ -2,14 +2,13 @@
 URL builder utilities for different scraping sources
 """
 
-from typing import Optional
-from ..filters import UnifiedFilters
 from ..data import (
-    MOBILE_DE_MAKES,
     MOBILE_DE_FUEL_TYPES,
+    MOBILE_DE_MAKES,
     MOBILE_DE_TRANSMISSION_TYPES,
     get_mobilede_model_id_by_name,
 )
+from ..filters import UnifiedFilters
 
 
 def build_mobile_de_search_url(filters: UnifiedFilters, page: int = 1) -> str:
@@ -35,6 +34,8 @@ def build_mobile_de_search_url(filters: UnifiedFilters, page: int = 1) -> str:
         "ref=quickSearch",
         "s=Car",
         "vc=Car",
+        # Opportunity searches must never include vehicles marked as damaged.
+        "dam=false",
     ]
 
     # Marca y modelo (ms=MAKE_CODE;;MODEL_CODE)

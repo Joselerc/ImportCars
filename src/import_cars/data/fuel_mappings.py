@@ -18,9 +18,12 @@ COCHES_NET_FUEL_TYPES = {
 MOBILE_DE_FUEL_TYPES = {
     "gasoline": "PETROL",
     "diesel": "DIESEL",
-    "electric": "ELECTRIC",
+    "electric": "ELECTRICITY",
     "hybrid": "HYBRID",
+    "hybrid_gasoline": "HYBRID",
+    "hybrid_diesel": "HYBRID_DIESEL",
+    "ethanol": "ETHANOL",
     "lpg": "LPG",
     "cng": "CNG",
-    "hydrogen": "HYDROGEN",
+    "hydrogen": "HYDROGENIUM",
 }

@@ -32,8 +32,10 @@ class FuelType(str, Enum):
     HYBRID = "hybrid"
     HYBRID_GASOLINE = "hybrid_gasoline"
     HYBRID_DIESEL = "hybrid_diesel"
+    ETHANOL = "ethanol"
     LPG = "lpg"
     CNG = "cng"
+    HYDROGEN = "hydrogen"
 
 
 class Transmission(str, Enum):
@@ -222,8 +224,10 @@ class FilterTranslator:
                 FuelType.HYBRID: "Híbrido",
                 FuelType.HYBRID_GASOLINE: "Híbrido (Gasolina)",
                 FuelType.HYBRID_DIESEL: "Híbrido (Diesel)",
+                FuelType.ETHANOL: "Etanol",
                 FuelType.LPG: "Gas licuado",
                 FuelType.CNG: "Gas natural",
+                FuelType.HYDROGEN: "Hidrógeno",
             },
             "coches_net": {
                 FuelType.GASOLINE: "gasoline",
