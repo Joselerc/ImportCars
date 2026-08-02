@@ -30,6 +30,11 @@ class MarketStub:
         )
 
 
+class EmptyMarketStub:
+    async def get_reference(self, target):
+        return None
+
+
 @pytest.mark.asyncio
 async def test_public_result_uses_engine_and_never_exposes_internal_metrics(
     tmp_path: Path, monkeypatch
@@ -162,3 +167,34 @@ async def test_damaged_listing_is_calculated_and_warned(
 
     assert result.final_price_eur > 0
     assert any("dañado o accidentado" in warning for warning in result.warnings)
+
+
+@pytest.mark.asyncio
+async def test_pure_electric_without_reported_co2_uses_zero_iedmt(
+    tmp_path: Path, monkeypatch
+) -> None:
+    database = tmp_path / "fiscal.sqlite3"
+    install_boe_dataset(database, parse_boe_xml(FIXTURE.read_bytes()))
+    monkeypatch.setenv("IMPORT_CARS_FISCAL_DATABASE_PATH", str(database))
+
+    result = await calculate_for_customer(
+        PublicCalculationInput(
+            make="Peugeot",
+            model="E-5008",
+            version="GT Elektromotor 210",
+            first_registration=date(2025, 1, 1),
+            purchase_price=54_550,
+            fuel="electrico",
+            displacement_cc=0,
+            power_kw=157,
+            seller_type="profesional_margen",
+            autonomous_community="Madrid",
+            municipality="Madrid",
+        ),
+        market_service=EmptyMarketStub(),
+    )
+
+    iedmt = next(row for row in result.breakdown if row["key"] == "iedmt")
+    assert iedmt["amount_eur"] == 0
+    assert "0 g/km" in iedmt["note"]
+    assert not any("CO2 no acreditado" in warning for warning in result.warnings)

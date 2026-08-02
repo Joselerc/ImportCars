@@ -126,7 +126,14 @@ _BOE_FUEL_CODES = {
 }
 
 
+def _effective_co2(data: PublicCalculationInput) -> float | None:
+    """Pure battery-electric vehicles have guaranteed zero tailpipe CO2."""
+
+    return 0.0 if data.fuel == "electrico" else data.co2_gkm
+
+
 def _market_target(data: PublicCalculationInput) -> NormalizedListing:
+    co2 = _effective_co2(data)
     return NormalizedListing(
         listing_id="public-calculation",
         source="manual",
@@ -149,8 +156,14 @@ def _market_target(data: PublicCalculationInput) -> NormalizedListing:
         cylinders=data.cylinders,
         body_type=data.body_type,
         transmission=data.transmission,
-        co2_original_g_km=round(data.co2_gkm) if data.co2_gkm is not None else None,
-        co2_confidence=1.0 if data.co2_confirmed else 0.5 if data.co2_gkm is not None else 0.0,
+        co2_original_g_km=round(co2) if co2 is not None else None,
+        co2_confidence=(
+            1.0
+            if data.fuel == "electrico" or data.co2_confirmed
+            else 0.5
+            if co2 is not None
+            else 0.0
+        ),
         seller=Seller(type="private" if data.seller_type == "particular" else "dealer"),
     )
 
@@ -187,6 +200,7 @@ async def _calculate(
         selected_row_id=selected_boe_row_id,
     )
     resolution = boe_audit.resolution
+    effective_co2 = _effective_co2(data)
     vehicle = Vehiculo(
         marca=data.make,
         modelo=" ".join(filter(None, [data.model, data.version])),
@@ -194,12 +208,18 @@ async def _calculate(
         precio_compra=data.purchase_price,
         combustible=_FUEL_MAP[data.fuel],
         cilindrada_cc=data.displacement_cc,
-        co2_gkm=data.co2_gkm,
+        co2_gkm=effective_co2,
         kilometros=data.mileage_km,
         potencia_kw=data.power_kw,
         cvf=data.cvf if data.cvf is not None else resolution.fiscal_hp if resolution else None,
         valor_tablas_nuevo=resolution.value_eur if resolution else None,
-        co2_confianza=1.0 if data.co2_confirmed else 0.5 if data.co2_gkm is not None else 0.0,
+        co2_confianza=(
+            1.0
+            if data.fuel == "electrico" or data.co2_confirmed
+            else 0.5
+            if effective_co2 is not None
+            else 0.0
+        ),
         carroceria=TipoCarroceria(data.body_type) if data.body_type else None,
         boe_fila_id=resolution.row_id if resolution else None,
         boe_orden=resolution.order_code if resolution else None,
