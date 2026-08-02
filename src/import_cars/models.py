@@ -87,6 +87,10 @@ class NormalizedListing(BaseModel):
     power_kw: int | None = None
     engine_displacement_cc: int | None = None
     cylinders: int | None = None
+    engine_type: str | None = None
+    energy_source: str | None = None
+    battery_info: str | None = None
+    battery_capacity_kwh: float | None = None
     body_type: str | None = None
     doors: int | None = None
     seats: int | None = None

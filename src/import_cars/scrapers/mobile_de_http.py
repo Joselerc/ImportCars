@@ -100,6 +100,41 @@ class MobileDeHttpScraper:
             return False
         return None
 
+    @staticmethod
+    def _fuel_from_attributes(attributes: dict[str, Any]) -> str | None:
+        """Return mobile.de fuel, including its electric-only ENVKV representation."""
+
+        standard_fuel = attributes.get("fuel")
+        if standard_fuel:
+            return str(standard_fuel)
+
+        electric_evidence = " ".join(
+            str(attributes.get(tag) or "")
+            for tag in ("envkv.engineType", "envkv.otherEnergySource")
+        ).casefold()
+        if any(
+            marker in electric_evidence
+            for marker in (
+                "electric",
+                "eléctric",
+                "elektro",
+                "elektrisch",
+                "electricidad",
+                "strom",
+            )
+        ):
+            return "Eléctrico"
+
+        # Some pure-electric ads only publish battery facts. Do not use battery
+        # alone for hybrids: combustion displacement/cylinders must also be absent.
+        if (
+            (attributes.get("battery") or attributes.get("batteryCapacity"))
+            and not attributes.get("cubicCapacity")
+            and not attributes.get("cylinder")
+        ):
+            return "Eléctrico"
+        return None
+
     def _session_for_current_thread(self):
         session = getattr(self._thread_local, "session", None)
         if session is None:
@@ -326,6 +361,9 @@ class MobileDeHttpScraper:
                 if co2 is not None:
                     break
         damage_condition = attributes.get("damageCondition")
+        engine_type = attributes.get("envkv.engineType")
+        energy_source = attributes.get("envkv.otherEnergySource")
+        battery_info = attributes.get("battery")
         contact = payload.get("contact") or {}
         rating = contact.get("rating") or {}
         phones = contact.get("phones") or []
@@ -363,12 +401,18 @@ class MobileDeHttpScraper:
             vat_deductible=net.get("amount") is not None,
             mileage_km=self._localized_integer(attributes.get("mileage")),
             first_registration=registration,
-            fuel_type=attributes.get("fuel"),
+            fuel_type=self._fuel_from_attributes(attributes),
             transmission=attributes.get("transmission"),
             power_hp=power_hp,
             power_kw=power_kw,
             engine_displacement_cc=self._localized_integer(attributes.get("cubicCapacity")),
             cylinders=self._localized_integer(attributes.get("cylinder")),
+            engine_type=engine_type,
+            energy_source=energy_source,
+            battery_info=battery_info,
+            battery_capacity_kwh=self._localized_decimal(
+                attributes.get("batteryCapacity")
+            ),
             body_type=attributes.get("category"),
             doors=self._localized_integer(attributes.get("doorCount")),
             seats=self._localized_integer(attributes.get("numSeats")),
@@ -542,6 +586,13 @@ class MobileDeHttpScraper:
     def _localized_number(value: str | None) -> float | None:
         integer = MobileDeHttpScraper._localized_integer(value)
         return float(integer) if integer is not None else None
+
+    @staticmethod
+    def _localized_decimal(value: str | None) -> float | None:
+        if not value:
+            return None
+        match = re.search(r"\d+(?:[.,]\d+)?", value.replace("\u00a0", " "))
+        return float(match.group(0).replace(",", ".")) if match else None
 
     def _extract_total_results(self, html_content: str) -> int | None:
         """Extraer el número total de resultados de la búsqueda"""

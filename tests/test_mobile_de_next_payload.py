@@ -2,6 +2,8 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 from import_cars.data import (
     get_cochesnet_model_id_by_name,
     get_cochesnet_models_for_make,
@@ -111,3 +113,65 @@ def test_coches_net_model_catalog_resolves_bmw_x5() -> None:
 
     assert any(item["label"] == "X5" for item in models)
     assert get_cochesnet_model_id_by_name("BMW", "X5") is not None
+
+
+def _electric_detail_html(listing_id: str, attributes: list[dict]) -> str:
+    listing = {
+        "id": int(listing_id),
+        "title": "Peugeot 5008 E-5008 GT Elektromotor 210",
+        "subTitle": "E-5008 GT Elektromotor 210",
+        "make": {"localized": "Peugeot"},
+        "model": {"localized": "5008"},
+        "price": {"grs": {"amount": 54550, "currency": "EUR"}},
+        "attributes": attributes,
+    }
+    decoded = f'1e:[["$","component",null,{{"listing":{json.dumps(listing)}}}]]'
+    return f"<script>self.__next_f.push([1,{json.dumps(decoded)}])</script>"
+
+
+@pytest.mark.parametrize(
+    "electric_attributes",
+    [
+        [
+            {"tag": "envkv.engineType", "value": "Motor eléctrico"},
+            {"tag": "envkv.otherEnergySource", "value": "Electricidad"},
+            {"tag": "battery", "value": "Batería comprada"},
+            {"tag": "batteryCapacity", "value": "73 kWh"},
+        ],
+        [{"tag": "envkv.engineType", "value": "Elektromotor"}],
+        [{"tag": "batteryCapacity", "value": "55 kWh"}],
+    ],
+)
+def test_electric_detail_is_detected_without_standard_fuel(
+    electric_attributes: list[dict],
+) -> None:
+    result = MobileDeHttpScraper()._extract_next_detail_listing(
+        _electric_detail_html("460350611", electric_attributes),
+        "460350611",
+        "https://www.mobile.de/details.html?id=460350611",
+    )
+
+    assert result is not None
+    assert result.fuel_type == "Eléctrico"
+
+
+def test_electric_metadata_is_preserved_from_json() -> None:
+    result = MobileDeHttpScraper()._extract_next_detail_listing(
+        _electric_detail_html(
+            "460350611",
+            [
+                {"tag": "envkv.engineType", "value": "Motor eléctrico"},
+                {"tag": "envkv.otherEnergySource", "value": "Electricidad"},
+                {"tag": "battery", "value": "Batería comprada"},
+                {"tag": "batteryCapacity", "value": "73,5 kWh"},
+            ],
+        ),
+        "460350611",
+        "https://www.mobile.de/details.html?id=460350611",
+    )
+
+    assert result is not None
+    assert result.engine_type == "Motor eléctrico"
+    assert result.energy_source == "Electricidad"
+    assert result.battery_info == "Batería comprada"
+    assert result.battery_capacity_kwh == 73.5
