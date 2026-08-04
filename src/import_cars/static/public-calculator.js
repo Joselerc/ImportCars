@@ -31,6 +31,7 @@
   let latestSourceUrl = null;
   let selectedBoeRowId = null;
   let co2Source = "user";
+  let registrationSource = "user";
 
   const breakdownHelp = {
     precio: "Es el precio publicado por el vendedor en Alemania, antes de transporte e impuestos españoles.",
@@ -118,7 +119,8 @@
       make: byId("m_make").value.trim(),
       model: byId("m_model").value.trim(),
       version: byId("m_version").value.trim() || null,
-      first_registration: byId("m_date").value,
+      first_registration: byId("m_date").value || null,
+      registration_source: registrationSource || "user",
       purchase_price: numeric("m_price"),
       purchase_price_net: numeric("m_price_net"),
       vat_deductible: byId("m_vat_deductible").value === "true",
@@ -174,7 +176,18 @@
     byId("m_body").value = listing.body_type || "";
     byId("m_co2_confirmed").checked = Boolean(listing.co2_confirmed);
     co2Source = listing.co2_source || (listing.co2_gkm === null ? null : "listing");
+    registrationSource = listing.registration_source || "user";
     byId("m_prov").value = byId("u_prov").value;
+  };
+
+  const renderPreflightWarnings = (warnings = []) => {
+    const box = byId("preflight-risk-box");
+    const list = byId("preflight-risk-list");
+    if (!box || !list) return;
+    list.replaceChildren();
+    warnings.forEach((warning) => addTextElement(list, "li", "", warning));
+    box.hidden = warnings.length === 0;
+    box.classList.toggle("critical", warnings.some((warning) => warning.startsWith("ATENCIÓN")));
   };
 
   const displayLabel = (row) => {
@@ -199,6 +212,8 @@
   const addBreakdownRow = (container, row, extraClass = "", auditLine = null) => {
     const element = document.createElement(auditLine ? "details" : "div");
     element.className = `bd-row ${extraClass} ${auditLine ? "audit-breakdown" : ""}`.trim();
+    element.dataset.breakdownKey = row.key;
+    if (auditLine) element.dataset.auditExpandable = "true";
     const shell = auditLine ? document.createElement("summary") : element;
     const label = document.createElement("div");
     label.className = "bd-label";
@@ -227,6 +242,7 @@
     value.textContent = money(row.amount_eur);
     shell.append(label, value);
     if (auditLine) {
+      shell.setAttribute("aria-label", `Desplegar auditoría de ${displayLabel(row)}`);
       element.appendChild(shell);
       const detail = document.createElement("div");
       detail.className = "audit-line-detail";
@@ -407,6 +423,7 @@
       const button = document.createElement("button");
       button.type = "button";
       button.className = "boe-select";
+      button.dataset.boeRowId = String(candidate.row_id);
       button.disabled = candidate.selected;
       button.textContent = candidate.selected ? "Fila aplicada" : "Usar esta fila y recalcular";
       button.addEventListener("click", () => {
@@ -418,7 +435,7 @@
     });
   };
 
-  const renderAuditVat = (vat) => {
+  const renderAuditVat = (vat, registration) => {
     const panel = byId("audit-vat");
     if (!panel || !vat) return;
     panel.hidden = false;
@@ -438,6 +455,8 @@
       ["IVA español", money(vat.spanish_vat_eur)],
       ["Origen de la base", labels[vat.tax_base_source] || vat.tax_base_source || "—"],
       ["Precio de adquisición", money(vat.acquisition_price_eur)],
+      ["Primera matriculación", registration?.value || "—"],
+      ["Origen de la fecha", ({ listing: "Anuncio", user: "Usuario", unregistered_new: "Nuevo sin matricular" })[registration?.source] || "—"],
     ].forEach(([label, value]) => {
       const card = document.createElement("div");
       card.className = "audit-stat";
@@ -445,7 +464,7 @@
       addTextElement(card, "strong", "", value);
       summary.appendChild(card);
     });
-    byId("audit-vat-reason").textContent = `${vat.reason} Vendedor: ${vat.seller_type}; comprador: ${vat.buyer_type}. Bruto: ${money(vat.gross_price_eur)}; neto anunciado: ${money(vat.advertised_net_price_eur)}.`;
+    byId("audit-vat-reason").textContent = `${vat.reason} ${registration?.reason || ""} Vendedor: ${vat.seller_type}; comprador: ${vat.buyer_type}. Bruto: ${money(vat.gross_price_eur)}; neto anunciado: ${money(vat.advertised_net_price_eur)}.`;
   };
 
   const render = (data) => {
@@ -475,12 +494,18 @@
     const rows = byId("breakdown-rows");
     rows.replaceChildren();
     const auditLines = new Map((data.audit?.fiscal_breakdown || []).map((line) => [line.key, line]));
-    (data.breakdown || []).forEach((row) => addBreakdownRow(
-      rows,
-      row,
-      row.key === "honorarios" ? "fee" : "",
-      config.auditMode ? auditLines.get(row.key) : null
-    ));
+    (data.breakdown || []).forEach((row) => {
+      const auditLine = auditLines.get(row.key) || {
+        formula: "La API de auditoría no ha proporcionado el detalle de esta partida.",
+        intermediates: [],
+      };
+      addBreakdownRow(
+        rows,
+        row,
+        row.key === "honorarios" ? "fee" : "",
+        config.auditMode ? auditLine : null
+      );
+    });
     addBreakdownRow(rows, {
       key: "total",
       label: "Precio final, todo incluido",
@@ -507,7 +532,7 @@
     );
     riskBox.hidden = !data.warnings || data.warnings.length === 0;
     if (config.auditMode) {
-      renderAuditVat(data.audit?.vat);
+      renderAuditVat(data.audit?.vat, data.audit?.registration);
       renderAuditBoe(data.audit?.boe);
       renderAuditMarket(data.audit?.market);
     }
@@ -558,6 +583,10 @@
     co2Source = numeric("m_co2") === null ? null : "user";
     byId("m_co2_confirmed").checked = false;
   });
+  byId("m_date").addEventListener("input", () => {
+    registrationSource = "user";
+    byId("m_unregistered_new").value = "false";
+  });
   byId("m_price").addEventListener("input", () => {
     byId("m_price_net").value = "";
     byId("m_vat_deductible").value = "false";
@@ -571,6 +600,7 @@
       return;
     }
     setStatus("url-status", "Leyendo el anuncio…");
+    renderPreflightWarnings([]);
     const button = event.currentTarget;
     setButtonLoading(button, true, "Leyendo anuncio…");
     try {
@@ -585,11 +615,25 @@
       selectedBoeRowId = null;
       fillManual(listing);
       switchPane("manual");
+      renderPreflightWarnings(listing.risk_warnings || []);
       if (listing.missing_fields.length) {
-        const missing = listing.missing_fields.map((field) => fieldNames[field] || "algún dato necesario");
+        const guidedFields = new Set();
+        const prompts = [];
+        if (listing.registration_prompt) {
+          prompts.push(listing.registration_prompt);
+          guidedFields.add("first_registration");
+        }
+        if (listing.co2_prompt) {
+          prompts.push(listing.co2_prompt);
+          guidedFields.add("co2_gkm");
+        }
+        const missing = listing.missing_fields
+          .filter((field) => !guidedFields.has(field))
+          .map((field) => fieldNames[field] || "algún dato necesario");
+        if (missing.length) prompts.push(`Revisa también ${missing.join(", ")}.`);
         setStatus(
           "manual-status",
-          listing.co2_prompt || `Revisa los datos: el anuncio no aporta ${missing.join(", ")}.`,
+          prompts.join(" ") || "Revisa los datos que faltan antes de calcular.",
           "error"
         );
       } else {

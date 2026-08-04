@@ -30,6 +30,31 @@ def test_parses_autoscout_structured_data_fixture() -> None:
     assert listing.seller.type == "dealer"
 
 
+def test_autoscout_model_year_is_not_guessed_as_first_registration() -> None:
+    html = """
+    <html><body><script type="application/ld+json">
+    {
+      "@type": "Vehicle",
+      "name": "Audi A4 2.0 TDI",
+      "brand": {"name": "Audi"},
+      "model": "A4",
+      "vehicleModelDate": "2026",
+      "fuelType": "Diesel",
+      "vehicleEngine": {"engineDisplacement": 1968, "enginePower": 110},
+      "offers": {"price": 22000, "seller": {"@type": "Organization"}}
+    }
+    </script></body></html>
+    """
+
+    listing = _parse_autoscout_html(
+        html,
+        "https://www.autoscout24.de/angebote/audi-a4-test-id",
+    )
+
+    assert listing.first_registration is None
+    assert listing.production_year == 2026
+
+
 @pytest.mark.parametrize(
     "url",
     [

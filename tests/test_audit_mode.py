@@ -149,6 +149,8 @@ async def test_audit_result_exposes_real_fiscal_trace_and_frozen_comparables(
     assert result.audit.vat["tax_base_eur"] == 0
     assert result.audit.vat["tax_base_source"] == "sin_iva_espanol_usado"
     assert result.audit.vat["spanish_vat_eur"] == 0
+    assert result.audit.registration["source"] == "user"
+    assert result.audit.registration["value"] == "2018-05-01"
     assert "pocos comparables" in result.audit.market["quality_warning"]
 
     fiscal = {line.key: line for line in result.audit.fiscal_breakdown}
@@ -184,6 +186,9 @@ async def test_audit_surface_is_protected_and_public_contract_stays_clean(
         transport=transport, base_url="http://testserver"
     ) as client:
         assert (await client.get("/calculadora")).status_code == 200
+        legacy_audit = await client.get("/calculadora?audit=1")
+        assert legacy_audit.status_code == 307
+        assert legacy_audit.headers["location"] == "/calculadora/auditoria"
         assert (await client.get("/calculadora/auditoria")).status_code == 401
         assert (
             await client.post(
@@ -211,5 +216,9 @@ async def test_audit_surface_is_protected_and_public_contract_stays_clean(
     assert audit_page.status_code == 200
     assert "Modo auditoría interno" in audit_page.text
     assert 'id="m_transmission"' in audit_page.text
+    assert 'id="preflight-risk-box"' in audit_page.text
     assert audit.status_code == 200
     assert audit.json()["audit"]["market"]["comparables"][0]["listing_id"] == "es-1"
+    audit_payload = audit.json()
+    fiscal_keys = {line["key"] for line in audit_payload["audit"]["fiscal_breakdown"]}
+    assert {line["key"] for line in audit_payload["breakdown"]} <= fiscal_keys

@@ -132,6 +132,8 @@ async def test_public_url_parser_returns_editable_fields(monkeypatch) -> None:
     assert payload["transmission"] == "automatic"
     assert payload["damaged"] is True
     assert payload["damage_condition"] == "Ocasión, Vehículo accidentado"
+    assert payload["registration_source"] == "listing"
+    assert any("dañado o accidentado" in warning for warning in payload["risk_warnings"])
     assert payload["missing_fields"] == []
 
 
@@ -172,6 +174,85 @@ async def test_public_url_parser_guides_missing_co2_without_learning_user_value(
     assert "Volkswagen Golf 1.5 TSI Style 2021" in payload["co2_prompt"]
     assert "no se guardará" in payload["co2_prompt"]
     assert not co2_memory.MEMORY_PATH.exists()
+
+
+@pytest.mark.asyncio
+async def test_parser_keeps_damage_warning_visible_while_requesting_co2(
+    monkeypatch,
+) -> None:
+    listing = NormalizedListing(
+        listing_id="damaged-missing-co2",
+        source="mobile_de",
+        url="https://www.mobile.de/details.html?id=damaged-missing-co2",
+        scraped_at=datetime.now(UTC),
+        make="BMW",
+        model="X5",
+        version="xDrive30d",
+        price_eur=18_900,
+        first_registration=Registration(year=2017, month=4),
+        fuel_type="Diésel",
+        engine_displacement_cc=2_993,
+        power_kw=190,
+        accident_free=False,
+        damage_condition="Ocasión, Vehículo accidentado",
+        seller=Seller(type="dealer"),
+    )
+    monkeypatch.setattr(webapp, "parse_listing_url", lambda url: listing)
+    transport = httpx.ASGITransport(app=webapp.app)
+
+    async with httpx.AsyncClient(
+        transport=transport, base_url="http://testserver"
+    ) as client:
+        response = await client.post(
+            "/api/public/parse-listing",
+            json={"url": "https://www.mobile.de/details.html?id=damaged-missing-co2"},
+        )
+
+    payload = response.json()
+    assert response.status_code == 200
+    assert "co2_gkm" in payload["missing_fields"]
+    assert "CO₂" in payload["co2_prompt"]
+    assert any("dañado o accidentado" in warning for warning in payload["risk_warnings"])
+
+
+@pytest.mark.asyncio
+async def test_parser_requests_unknown_registration_without_guessing(
+    monkeypatch,
+) -> None:
+    listing = NormalizedListing(
+        listing_id="missing-registration",
+        source="mobile_de",
+        url="https://www.mobile.de/details.html?id=missing-registration",
+        scraped_at=datetime.now(UTC),
+        make="Audi",
+        model="A4",
+        version="2.0 TDI",
+        production_year=2026,
+        price_eur=22_000,
+        fuel_type="Diésel",
+        engine_displacement_cc=1_968,
+        power_kw=110,
+        co2_original_g_km=130,
+        seller=Seller(type="dealer"),
+    )
+    monkeypatch.setattr(webapp, "parse_listing_url", lambda url: listing)
+    transport = httpx.ASGITransport(app=webapp.app)
+
+    async with httpx.AsyncClient(
+        transport=transport, base_url="http://testserver"
+    ) as client:
+        response = await client.post(
+            "/api/public/parse-listing",
+            json={"url": "https://www.mobile.de/details.html?id=missing-registration"},
+        )
+
+    payload = response.json()
+    assert response.status_code == 200
+    assert payload["first_registration"] is None
+    assert payload["registration_source"] is None
+    assert "first_registration" in payload["missing_fields"]
+    assert "Audi A4 2.0 TDI 2026" in payload["registration_prompt"]
+    assert "solo en tu cálculo" in payload["registration_prompt"]
 
 
 @pytest.mark.asyncio
@@ -217,6 +298,7 @@ async def test_public_parser_preserves_net_price_and_unregistered_new_status(
     assert payload["purchase_price_net"] == 45_840.34
     assert payload["vat_deductible"] is True
     assert payload["unregistered_new"] is True
+    assert payload["registration_source"] == "unregistered_new"
     assert payload["first_registration"] is None
     assert payload["seller_type"] == "profesional_iva"
     assert "first_registration" not in payload["missing_fields"]

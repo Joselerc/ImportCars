@@ -13,7 +13,7 @@ from typing import Annotated
 
 import uvicorn
 from fastapi import Depends, FastAPI, HTTPException, Request, status
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -32,6 +32,7 @@ from .services import (
     SpanishMarketReferenceService,
     calculate_for_audit,
     calculate_for_customer,
+    damage_risk_warning,
     parse_listing_url,
     save_public_lead,
 )
@@ -690,6 +691,13 @@ def _parsed_listing_payload(listing) -> dict:
         "model": listing.model,
         "version": listing.version,
         "first_registration": first_registration,
+        "registration_source": (
+            "unregistered_new"
+            if listing.unregistered_new
+            else "listing"
+            if registration
+            else None
+        ),
         "purchase_price": listing.price_eur,
         "purchase_price_net": listing.price_net_eur,
         "vat_deductible": bool(listing.vat_deductible),
@@ -751,6 +759,30 @@ def _parsed_listing_payload(listing) -> dict:
         )
     else:
         payload["co2_prompt"] = None
+    if not registration and not listing.unregistered_new:
+        vehicle = " ".join(
+            filter(
+                None,
+                [
+                    listing.make,
+                    listing.model,
+                    listing.version,
+                    str(listing.production_year) if listing.production_year else None,
+                ],
+            )
+        )
+        payload["registration_prompt"] = (
+            f"El anuncio no indica la primera matriculación de {vehicle}. "
+            "Introdúcela antes de calcular. Esta fecha se usará solo en tu cálculo "
+            "y no se guardará."
+        )
+    else:
+        payload["registration_prompt"] = None
+    damage_warning = damage_risk_warning(
+        payload["damaged"],
+        payload["damage_condition"],
+    )
+    payload["risk_warnings"] = [damage_warning] if damage_warning else []
     return payload
 
 
@@ -815,6 +847,8 @@ async def reports(request: Request, _access: None = Depends(_require_internal_ac
 @app.get("/calculadora", response_class=HTMLResponse)
 @app.get("/import-calculator", response_class=HTMLResponse)
 async def calculator(request: Request):
+    if request.query_params.get("audit") == "1":
+        return RedirectResponse(url="/calculadora/auditoria", status_code=307)
     return templates.TemplateResponse(
         request,
         "public_calculator.html",

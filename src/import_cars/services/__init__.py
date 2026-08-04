@@ -9,6 +9,7 @@ from .public_calculator import (
     PublicCalculationResult,
     calculate_for_audit,
     calculate_for_customer,
+    damage_risk_warning,
 )
 
 __all__ = [
@@ -24,6 +25,7 @@ __all__ = [
     "break_even_scenarios",
     "calculate_for_audit",
     "calculate_for_customer",
+    "damage_risk_warning",
     "parse_listing_url",
     "save_public_lead",
     "vehicle_from_listing",

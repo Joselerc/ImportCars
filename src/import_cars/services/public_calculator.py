@@ -55,6 +55,7 @@ class PublicCalculationInput(BaseModel):
     municipality: str = Field(min_length=1, max_length=120)
     co2_confirmed: bool = False
     co2_source: Literal["listing", "memory", "user", "electric_zero"] | None = None
+    registration_source: Literal["listing", "user", "unregistered_new"] = "user"
     damaged: bool = False
     damage_condition: str | None = Field(None, max_length=160)
 
@@ -64,6 +65,8 @@ class PublicCalculationInput(BaseModel):
             raise ValueError(
                 "La primera matriculacion es obligatoria salvo vehículo nuevo sin matricular"
             )
+        if self.unregistered_new:
+            self.registration_source = "unregistered_new"
         if (
             self.first_registration is not None
             and self.first_registration > datetime.now(UTC).date()
@@ -106,6 +109,7 @@ class CalculationAudit(BaseModel):
     market: dict
     boe: dict
     vat: dict
+    registration: dict
     fiscal_breakdown: list[FiscalAuditLine]
 
 
@@ -143,6 +147,21 @@ _BOE_FUEL_CODES = {
     "glp": "GLP",
     "otro": "Otro",
 }
+
+
+def damage_risk_warning(
+    damaged: bool,
+    damage_condition: str | None = None,
+) -> str | None:
+    """Aviso crítico reutilizable desde el parseo y desde el cálculo final."""
+    if not damaged:
+        return None
+    detail = f" ({damage_condition})" if damage_condition else ""
+    return (
+        "ATENCIÓN: el anuncio marca el vehículo como dañado o accidentado"
+        f"{detail}. El cálculo se mantiene, pero revisa el alcance de los daños "
+        "y solicita una inspección antes de comprar."
+    )
 
 
 def _co2_context(data: PublicCalculationInput) -> tuple[float | None, str, float]:
@@ -210,7 +229,14 @@ async def _calculate(
     """Return only customer-facing totals, explanations and risk warnings."""
 
     target = _market_target(data)
-    fiscal_registration = data.first_registration or datetime.now(UTC).date()
+    if data.unregistered_new:
+        fiscal_registration = datetime.now(UTC).date()
+        registration_source = "unregistered_new"
+    else:
+        # El validador impide calcular si falta el dato. No se inventa una fecha.
+        assert data.first_registration is not None
+        fiscal_registration = data.first_registration
+        registration_source = data.registration_source
     market = None
     market_warning = None
     try:
@@ -284,13 +310,9 @@ async def _calculate(
             "El anuncio no aporta kilometraje. Confírmalo: por debajo de 6.000 km "
             "el vehículo puede tener la consideración fiscal de nuevo."
         )
-    if data.damaged:
-        detail = f" ({data.damage_condition})" if data.damage_condition else ""
-        warnings.append(
-            "ATENCIÓN: el anuncio marca el vehículo como dañado o accidentado"
-            f"{detail}. El cálculo se mantiene, pero revisa el alcance de los daños "
-            "y solicita una inspección antes de comprar."
-        )
+    damage_warning = damage_risk_warning(data.damaged, data.damage_condition)
+    if damage_warning:
+        warnings.append(damage_warning)
     if not data.version:
         warnings.append(
             "Falta la versión o motorización exacta. Añádela para afinar la tabla "
@@ -421,6 +443,18 @@ async def _calculate(
                 "spanish_vat_eur": result.iva,
                 "acquisition_price_eur": result.precio_adquisicion,
             },
+            registration={
+                "value": fiscal_registration.isoformat(),
+                "source": registration_source,
+                "reason": (
+                    "El anuncio identifica expresamente el vehículo como nuevo sin matricular; "
+                    "se usa la fecha actual para el cálculo."
+                    if registration_source == "unregistered_new"
+                    else "Fecha introducida por el usuario; se usa solo en este cálculo y no se guarda."
+                    if registration_source == "user"
+                    else "Fecha de primera matriculación extraída del anuncio."
+                ),
+            },
             fiscal_breakdown=[
                 FiscalAuditLine(
                     key=line.clave,
@@ -480,4 +514,5 @@ __all__ = [
     "PublicCalculationResult",
     "calculate_for_audit",
     "calculate_for_customer",
+    "damage_risk_warning",
 ]

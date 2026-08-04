@@ -152,8 +152,13 @@ def _parse_autoscout_html(html: str, url: str) -> NormalizedListing:
         price_eur=price,
         vat_deductible=vat_deductible,
         mileage_km=int(mileage) if mileage is not None else None,
-        first_registration=_registration(
-            vehicle.get("dateVehicleFirstRegistered") or vehicle.get("vehicleModelDate")
+        # `vehicleModelDate` es año/modelo, no primera matriculación. Si falta
+        # `dateVehicleFirstRegistered`, la calculadora debe preguntarlo.
+        first_registration=_registration(vehicle.get("dateVehicleFirstRegistered")),
+        production_year=(
+            registration.year
+            if (registration := _registration(vehicle.get("vehicleModelDate")))
+            else None
         ),
         fuel_type=fuel,
         power_kw=int(power) if power is not None else None,
