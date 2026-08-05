@@ -335,7 +335,12 @@
       const heading = document.createElement("div");
       heading.className = "comparable-head";
       addTextElement(heading, "strong", "", `${index + 1}. ${car.title || car.version || "Anuncio sin título"}`);
-      addTextElement(heading, "span", "", `${money(car.price_eur)} · nivel ${car.match_level}`);
+      addTextElement(
+        heading,
+        "span",
+        "",
+        `${money(car.price_eur)} · nivel ${car.match_level} · ${car.used_for_price ? "usado en el ahorro" : "solo informativo"}`
+      );
       itemSummary.appendChild(heading);
       details.appendChild(itemSummary);
       const body = document.createElement("div");
@@ -363,15 +368,24 @@
       link.rel = "noopener";
       link.textContent = "Abrir anuncio en coches.net ↗";
       body.appendChild(link);
-      const groups = { used: [], not_used: [], unavailable: [] };
-      (car.checks || []).forEach((check) => groups[check.status]?.push(check.label));
       const checks = document.createElement("div");
       checks.className = "audit-checks";
-      checks.textContent = [
-        `Usados: ${groups.used.join(", ") || "ninguno"}.`,
-        `No usados por la política actual: ${groups.not_used.join(", ") || "ninguno"}.`,
-        `No aplicables por falta de datos: ${groups.unavailable.join(", ") || "ninguno"}.`,
-      ].join(" ");
+      const outcomeLabels = {
+        match: "Coincide",
+        mismatch: "No coincide",
+        relaxed: "Criterio relajado",
+        unavailable: "Sin dato",
+      };
+      (car.checks || []).forEach((check) => {
+        const checkRow = document.createElement("div");
+        checkRow.className = `audit-check outcome-${check.outcome || "unavailable"}`;
+        addTextElement(checkRow, "span", "", check.label);
+        const explanation = document.createElement("div");
+        addTextElement(explanation, "strong", "", outcomeLabels[check.outcome] || check.outcome || "Sin dato");
+        addTextElement(explanation, "small", "", check.note || "Sin explicación adicional.");
+        checkRow.appendChild(explanation);
+        checks.appendChild(checkRow);
+      });
       body.appendChild(checks);
       details.appendChild(body);
       comparables.appendChild(details);
@@ -474,21 +488,23 @@
     const savingsCard = byId("savings-card");
     const savingsLabel = savingsCard.querySelector(".lbl");
     savingsCard.classList.remove("positive", "negative", "unavailable");
+    const levelLabels = { exact: "exacto", near: "cercano", broad: "amplio" };
+    const levelLabel = levelLabels[data.market_match_level] || "sin nivel";
     if (data.savings_eur === null || data.spanish_market_price_eur === null) {
       savingsCard.classList.add("unavailable");
       savingsLabel.textContent = "Ahorro aún no disponible";
       byId("r_save").textContent = "—";
-      byId("r_es").textContent = "No hay suficientes comparables españoles. El precio final sí está calculado.";
+      byId("r_es").textContent = "No hay comparables suficientes para estimar el ahorro; solo mostramos el precio final.";
     } else if (data.savings_eur >= 0) {
       savingsCard.classList.add("positive");
-      savingsLabel.textContent = "Te ahorras";
+      savingsLabel.textContent = data.market_match_level === "broad" ? "Ahorro orientativo" : "Te ahorras";
       byId("r_save").textContent = money(data.savings_eur);
-      byId("r_es").textContent = `frente a ${money(data.spanish_market_price_eur)} de media en España · ${data.market_sample_size} comparables`;
+      byId("r_es").textContent = `frente a ${money(data.spanish_market_price_eur)} de media en España · ${data.market_sample_size} comparables · nivel ${levelLabel}`;
     } else {
       savingsCard.classList.add("negative");
-      savingsLabel.textContent = "Cuesta más que en España";
+      savingsLabel.textContent = data.market_match_level === "broad" ? "Comparación orientativa" : "Cuesta más que en España";
       byId("r_save").textContent = money(Math.abs(data.savings_eur));
-      byId("r_es").textContent = `sobre ${money(data.spanish_market_price_eur)} de media en España · ${data.market_sample_size} comparables`;
+      byId("r_es").textContent = `sobre ${money(data.spanish_market_price_eur)} de media en España · ${data.market_sample_size} comparables · nivel ${levelLabel}`;
     }
 
     const rows = byId("breakdown-rows");

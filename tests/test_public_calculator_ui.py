@@ -8,7 +8,7 @@ from collections.abc import Iterator
 
 import pytest
 import uvicorn
-from playwright.sync_api import Browser, Page, sync_playwright
+from playwright.sync_api import Browser, Page, expect, sync_playwright
 
 from import_cars.webapp import app
 
@@ -87,10 +87,11 @@ def _audit_payload(selected_row_id: int = 101) -> dict:
     return {
         "vehicle_label": "Peugeot 5008 1.6 THP Allure GT-Line · 2017",
         "final_price_eur": 19_675,
-        "spanish_market_price_eur": None,
-        "savings_eur": None,
-        "savings_pct": None,
-        "market_sample_size": 0,
+        "spanish_market_price_eur": 24_000,
+        "savings_eur": 4_325,
+        "savings_pct": 18.02,
+        "market_sample_size": 1,
+        "market_match_level": "near",
         "market_confidence": "unavailable",
         "market_cached": False,
         "breakdown": [
@@ -106,17 +107,62 @@ def _audit_payload(selected_row_id: int = 101) -> dict:
         "audit": {
             "market": {
                 "source": "coches_net",
-                "match_level": None,
-                "sample_size": 0,
-                "average_eur": None,
-                "median_eur": None,
-                "minimum_eur": None,
-                "maximum_eur": None,
-                "confidence": "unavailable",
+                "match_level": "near",
+                "sample_size": 1,
+                "average_eur": 24_000,
+                "median_eur": 24_000,
+                "minimum_eur": 24_000,
+                "maximum_eur": 24_000,
+                "confidence": "medium",
                 "cached": False,
                 "quality_warning": None,
                 "criteria": [],
-                "comparables": [],
+                "comparables": [
+                    {
+                        "listing_id": "es-market-1",
+                        "title": "PEUGEOT 5008 GTLine 1.6L THP EAT6",
+                        "url": "https://www.coches.net/peugeot-5008-es-market-1",
+                        "price_eur": 24_000,
+                        "mileage_km": 99_500,
+                        "year": 2018,
+                        "version": "GTLine 1.6L THP EAT6",
+                        "fuel": "Gasolina",
+                        "transmission": "automatic",
+                        "power_hp": 165,
+                        "displacement_cc": 1598,
+                        "match_level": "near",
+                        "used_for_price": True,
+                        "checks": [
+                            {
+                                "key": "version",
+                                "label": "Motorización / versión",
+                                "target_value": "1600:thp",
+                                "comparable_value": "1600:thp",
+                                "status": "used",
+                                "outcome": "match",
+                                "note": "Motorización THP coincidente.",
+                            },
+                            {
+                                "key": "mileage",
+                                "label": "Kilómetros",
+                                "target_value": 82_500,
+                                "comparable_value": 99_500,
+                                "status": "used",
+                                "outcome": "match",
+                                "note": "Diferencia de 17.000 km; nivel near.",
+                            },
+                            {
+                                "key": "transmission",
+                                "label": "Cambio",
+                                "target_value": "automatic",
+                                "comparable_value": "automatic",
+                                "status": "used",
+                                "outcome": "match",
+                                "note": "Mismo tipo de cambio.",
+                            },
+                        ],
+                    }
+                ],
             },
             "boe": {
                 "query": "5008 1.6 THP Allure GT-LINE",
@@ -199,10 +245,16 @@ def test_audit_rows_expand_and_boe_candidate_recalculates(
     page.locator("#manual-submit").click()
 
     expandable = page.locator('details[data-audit-expandable="true"]')
-    assert expandable.count() == 2
+    expect(expandable).to_have_count(2)
     expandable.first.locator("summary").click()
     assert expandable.first.get_attribute("open") is not None
     assert "Base imponible × tipo IEDMT" in expandable.first.inner_text()
+
+    market_comparable = page.locator("#audit-comparables details").first
+    market_comparable.locator("summary").click()
+    assert "COINCIDE" in market_comparable.inner_text()
+    assert "Diferencia de 17.000 km" in market_comparable.inner_text()
+    assert "nivel cercano" in page.locator("#r_es").inner_text()
 
     selector = page.locator('.boe-select[data-boe-row-id="202"]')
     assert selector.is_visible()
@@ -262,7 +314,7 @@ def test_damage_warning_coexists_with_missing_co2_prompt(
     page.locator("#urlInput").fill(listing["source_url"])
     page.locator("#url-submit").click()
 
-    assert "No encontramos el CO₂" in page.locator("#manual-status").inner_text()
+    expect(page.locator("#manual-status")).to_contain_text("No encontramos el CO₂")
     warning_box = page.locator("#preflight-risk-box")
     assert warning_box.is_visible()
     assert "dañado o accidentado" in warning_box.inner_text()

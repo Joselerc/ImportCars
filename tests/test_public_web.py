@@ -76,6 +76,7 @@ async def test_public_page_and_calculation_do_not_require_internal_auth(
         "savings_eur",
         "savings_pct",
         "market_sample_size",
+        "market_match_level",
         "market_confidence",
         "market_cached",
         "breakdown",

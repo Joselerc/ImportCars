@@ -151,7 +151,7 @@ async def test_audit_result_exposes_real_fiscal_trace_and_frozen_comparables(
     assert result.audit.vat["spanish_vat_eur"] == 0
     assert result.audit.registration["source"] == "user"
     assert result.audit.registration["value"] == "2018-05-01"
-    assert "pocos comparables" in result.audit.market["quality_warning"]
+    assert "muestra usada" in result.audit.market["quality_warning"]
 
     fiscal = {line.key: line for line in result.audit.fiscal_breakdown}
     iedmt = {item["key"]: item for item in fiscal["iedmt"].intermediates}

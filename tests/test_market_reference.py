@@ -61,6 +61,8 @@ async def test_market_reference_prefers_exact_matches_and_uses_short_cache() -> 
             calls += 1
             assert query.make == "BMW"
             assert query.model == "X5"
+            assert query.mileage_range.min_mileage == 0
+            assert query.mileage_range.max_mileage == 120_000
             assert limit == 50
             return SearchResult(listings=candidates)
 
@@ -79,10 +81,10 @@ async def test_market_reference_prefers_exact_matches_and_uses_short_cache() -> 
     second = await service.get_reference(target)
 
     assert first.match_level == "exact"
-    assert first.sample_size == 2
-    assert first.median_eur == 41_000
+    assert first.sample_size == 1
+    assert first.median_eur == 40_000
     assert first.confidence == "high"
-    assert [item.listing_id for item in first.comparables] == ["es-1", "es-2"]
+    assert [item.listing_id for item in first.comparables] == ["es-1"]
     assert first.comparables[0].mileage_km == 60_000
     assert first.comparables[0].year == 2020
     assert first.comparables[0].fuel == "diesel"
@@ -90,14 +92,92 @@ async def test_market_reference_prefers_exact_matches_and_uses_short_cache() -> 
     assert first.comparables[0].url.endswith("/es-1")
     criteria = {item.key: item for item in first.criteria}
     assert criteria["fuel"].status == "used"
-    assert criteria["mileage"].status == "not_used"
-    assert criteria["transmission"].status == "not_used"
+    assert criteria["mileage"].status == "used"
+    assert criteria["transmission"].status == "used"
     checks = {item.key: item for item in first.comparables[0].checks}
-    assert checks["mileage"].status == "not_used"
-    assert checks["transmission"].status == "not_used"
-    missing_checks = {item.key: item for item in first.comparables[1].checks}
-    assert missing_checks["transmission"].status == "unavailable"
-    assert "falta el dato" in missing_checks["transmission"].note
+    assert checks["mileage"].status == "used"
+    assert checks["mileage"].outcome == "match"
+    assert checks["transmission"].status == "used"
+    assert checks["transmission"].outcome == "match"
     assert first.cached is False
     assert second.cached is True
     assert calls == 1
+
+
+@pytest.mark.asyncio
+async def test_near_prefers_same_transmission_without_price_adjustment() -> None:
+    candidates = [
+        listing(
+            "es-manual",
+            source="coches_net",
+            title="BMW X5 xDrive30d",
+            price=40_000,
+            mileage_km=80_000,
+            transmission="manual",
+        ),
+        listing(
+            "es-auto",
+            source="coches_net",
+            title="BMW X5 xDrive30d",
+            price=44_000,
+            mileage_km=80_000,
+            transmission="automatic",
+        ),
+    ]
+
+    class ScraperStub:
+        async def search(self, *, query, limit):
+            return SearchResult(listings=candidates)
+
+    target = listing(
+        "de-1",
+        source="mobile_de",
+        title="BMW X5 xDrive30d",
+        price=30_000,
+        mileage_km=60_000,
+        transmission="automatic",
+    )
+    result = await SpanishMarketReferenceService(
+        ttl_seconds=0,
+        scraper_factory=ScraperStub,
+    ).get_reference(target)
+
+    assert result.match_level == "near"
+    assert result.sample_size == 1
+    assert result.median_eur == 44_000
+    comparables = {item.listing_id: item for item in result.comparables}
+    assert comparables["es-auto"].used_for_price is True
+    assert comparables["es-manual"].used_for_price is False
+    assert "no entran en la mediana" in result.quality_warning
+
+
+@pytest.mark.asyncio
+async def test_broad_reference_is_explicitly_orientative() -> None:
+    candidate = listing(
+        "es-broad",
+        source="coches_net",
+        title="BMW X5 xDrive30d",
+        price=41_000,
+        mileage_km=110_000,
+    )
+
+    class ScraperStub:
+        async def search(self, *, query, limit):
+            return SearchResult(listings=[candidate])
+
+    target = listing(
+        "de-1",
+        source="mobile_de",
+        title="BMW X5 xDrive30d",
+        price=30_000,
+        mileage_km=60_000,
+    )
+    result = await SpanishMarketReferenceService(
+        ttl_seconds=0,
+        scraper_factory=ScraperStub,
+    ).get_reference(target)
+
+    assert result.match_level == "broad"
+    assert result.median_eur == 41_000
+    assert result.confidence == "low"
+    assert "ahorro es orientativo" in result.quality_warning

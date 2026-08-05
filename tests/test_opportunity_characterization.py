@@ -2,7 +2,7 @@ from datetime import UTC, datetime
 
 import pytest
 
-from import_cars.analysis.opportunity import apply_opportunity_analysis
+from import_cars.analysis.opportunity import apply_opportunity_analysis, match_level
 from import_cars.models import NormalizedListing, Registration, Seller
 
 
@@ -17,6 +17,8 @@ def listing(
     power_hp: int = 265,
     displacement_cc: int = 2_993,
     seller_type: str = "dealer",
+    mileage_km: int = 60_000,
+    transmission: str | None = "automatic",
 ) -> NormalizedListing:
     return NormalizedListing(
         listing_id=listing_id,
@@ -31,6 +33,8 @@ def listing(
         fuel_type=fuel,
         power_hp=power_hp,
         engine_displacement_cc=displacement_cc,
+        mileage_km=mileage_km,
+        transmission=transmission,
         seller=Seller(type=seller_type),
     )
 
@@ -167,6 +171,81 @@ def test_different_known_engine_variants_never_match() -> None:
 
     assert opportunities == []
     assert german.es_sample_size == 0
+
+
+@pytest.mark.parametrize(
+    ("mileage_delta", "expected_level"),
+    [
+        (15_000, "exact"),
+        (15_001, "near"),
+        (35_000, "near"),
+        (35_001, "broad"),
+        (60_000, "broad"),
+        (60_001, None),
+    ],
+)
+def test_mileage_thresholds_define_each_match_level(
+    mileage_delta: int,
+    expected_level: str | None,
+) -> None:
+    target = listing(
+        "de-km",
+        source="mobile_de",
+        title="BMW X5 xDrive30d",
+        price=30_000,
+        mileage_km=100_000,
+    )
+    candidate = listing(
+        "es-km",
+        source="coches_net",
+        title="BMW X5 xDrive30d",
+        price=40_000,
+        mileage_km=100_000 + mileage_delta,
+    )
+
+    assert match_level(target, candidate) == expected_level
+
+
+def test_exact_requires_same_transmission_but_near_allows_mismatch() -> None:
+    target = listing(
+        "de-auto",
+        source="mobile_de",
+        title="BMW X5 xDrive30d",
+        price=30_000,
+        transmission="automatic",
+    )
+    manual = listing(
+        "es-manual",
+        source="coches_net",
+        title="BMW X5 xDrive30d",
+        price=40_000,
+        transmission="manual",
+    )
+
+    assert match_level(target, manual) == "near"
+
+
+def test_named_engine_family_conflict_is_rejected_even_from_broad() -> None:
+    target = listing(
+        "de-thp",
+        source="mobile_de",
+        title="Peugeot 5008 1.6 THP Allure",
+        price=18_000,
+        power_hp=165,
+        displacement_cc=1_598,
+        fuel="gasoline",
+    ).model_copy(update={"make": "Peugeot", "model": "5008"})
+    puretech = listing(
+        "es-puretech",
+        source="coches_net",
+        title="Peugeot 5008 1.6 PureTech EAT8",
+        price=23_000,
+        power_hp=180,
+        displacement_cc=1_598,
+        fuel="gasoline",
+    ).model_copy(update={"make": "Peugeot", "model": "5008"})
+
+    assert match_level(target, puretech) is None
 
 
 def test_opportunities_are_sorted_by_import_ready_score() -> None:

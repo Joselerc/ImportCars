@@ -84,6 +84,7 @@ class PublicCalculationResult(BaseModel):
     savings_eur: float | None
     savings_pct: float | None
     market_sample_size: int
+    market_match_level: str | None
     market_confidence: str
     market_cached: bool
     breakdown: list[dict[str, str | float]]
@@ -324,12 +325,16 @@ async def _calculate(
         )
     if market_warning:
         warnings.append(market_warning)
-    if market and 0 < market.sample_size < 3:
-        warnings.append(
-            f"Comparación orientativa: solo hay {market.sample_size} "
-            f"{'comparable' if market.sample_size == 1 else 'comparables'} disponible"
-            ". Revisa los anuncios antes de valorar el ahorro como definitivo."
-        )
+    market_quality_warning = None
+    if market:
+        market_quality_warning = market.quality_warning
+        if not market_quality_warning and 0 < market.sample_size < 3:
+            market_quality_warning = (
+                f"La muestra usada tiene solo {market.sample_size} "
+                f"{'comparable' if market.sample_size == 1 else 'comparables'}."
+            )
+    if market_quality_warning:
+        warnings.append(market_quality_warning)
     if market_price is not None and data.purchase_price < market_price * 0.55:
         warnings.append(
             "El precio del anuncio es inusualmente bajo frente al mercado espanol. "
@@ -346,6 +351,7 @@ async def _calculate(
         savings_eur=round(result.ahorro_absoluto, 2) if result.ahorro_absoluto is not None else None,
         savings_pct=round(result.ahorro_pct, 2) if result.ahorro_pct is not None else None,
         market_sample_size=market.sample_size if market else 0,
+        market_match_level=market.match_level if market else None,
         market_confidence=market.confidence if market else "unavailable",
         market_cached=market.cached if market else False,
         breakdown=[
@@ -378,11 +384,7 @@ async def _calculate(
                 "maximum_eur": market.maximum_eur if market else None,
                 "confidence": market.confidence if market else "unavailable",
                 "cached": market.cached if market else False,
-                "quality_warning": (
-                    "Comparación orientativa: hay muy pocos comparables."
-                    if market and 0 < market.sample_size < 3
-                    else None
-                ),
+                "quality_warning": market_quality_warning or market_warning,
                 "criteria": [
                     criterion.model_dump(mode="json")
                     for criterion in market.criteria

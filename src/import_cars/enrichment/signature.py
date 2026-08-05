@@ -60,7 +60,9 @@ def build_model_key(value: str | None) -> str:
 
 
 def build_variant_key(listing: NormalizedListing) -> str:
-    text = normalize_text(" ".join(filter(None, [listing.model, listing.title])))
+    text = normalize_text(
+        " ".join(filter(None, [listing.version, listing.title, listing.model]))
+    )
     tokens = [token for token in text.split("_") if token and token != "na"]
     if not tokens:
         return "na"
@@ -86,6 +88,59 @@ def build_variant_key(listing: NormalizedListing) -> str:
             return token
 
     return "na"
+
+
+_ENGINE_FAMILY_PATTERNS: tuple[tuple[str, str], ...] = (
+    (r"(?:^|_)pure_?tech(?:_|$)", "puretech"),
+    (r"(?:^|_)blue_?hdi(?:_|$)", "bluehdi"),
+    (r"(?:^|_)e_?tsi(?:_|$)", "etsi"),
+    (r"(?:^|_)e_?hybrid(?:_|$)", "ehybrid"),
+    (r"(?:^|_)tfsi(?:_|$)", "tfsi"),
+    (r"(?:^|_)tsi(?:_|$)", "tsi"),
+    (r"(?:^|_)thp(?:_|$)", "thp"),
+    (r"(?:^|_)hdi(?:_|$)", "hdi"),
+    (r"(?:^|_)tce(?:_|$)", "tce"),
+    (r"(?:^|_)dci(?:_|$)", "dci"),
+    (r"(?:^|_)cdi(?:_|$)", "cdi"),
+    (r"(?:^|_)crdi(?:_|$)", "crdi"),
+    (r"(?:^|_)cdti(?:_|$)", "cdti"),
+    (r"(?:^|_)multijet(?:_|$)", "multijet"),
+    (r"(?:^|_)jtd(?:_|$)", "jtd"),
+    (r"(?:^|_)ecoboost(?:_|$)", "ecoboost"),
+    (r"(?:^|_)skyactiv(?:_|$)", "skyactiv"),
+    (r"(?:^|_)d_?4d(?:_|$)", "d4d"),
+)
+
+
+def build_engine_key(listing: NormalizedListing) -> str:
+    """Identidad conservadora de motorización para comparables de mercado.
+
+    Combina la familia anunciada (THP, PureTech, TSI, 30d...) con la cilindrada
+    estructurada. Una clave distinta es un conflicto real; la ausencia de clave
+    solo permite llegar al nivel amplio.
+    """
+
+    fuel = normalize_fuel_category(listing.fuel_type)
+    text = normalize_text(
+        " ".join(filter(None, [listing.version, listing.title, listing.model]))
+    )
+    family = "electric" if fuel == "electric" else None
+    if family is None:
+        for pattern, value in _ENGINE_FAMILY_PATTERNS:
+            if re.search(pattern, text):
+                family = value
+                break
+    if family is None:
+        variant = build_variant_key(listing)
+        family = variant if variant != "na" else None
+    if family is None:
+        return "na"
+
+    displacement = listing.engine_displacement_cc
+    if displacement and fuel != "electric":
+        displacement_band = int(round(displacement / 100.0) * 100)
+        return f"{displacement_band}:{family}"
+    return family
 
 
 def build_vehicle_signature(listing: NormalizedListing) -> str:

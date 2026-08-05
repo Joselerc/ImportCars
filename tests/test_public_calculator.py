@@ -37,6 +37,17 @@ class EmptyMarketStub:
         return None
 
 
+class NoComparableMarketStub:
+    async def get_reference(self, target):
+        return MarketReference(
+            fetched_at=datetime.now(UTC),
+            quality_warning=(
+                "No hay comparables suficientes dentro del nivel broad; "
+                "no se estima el ahorro."
+            ),
+        )
+
+
 @pytest.mark.asyncio
 async def test_public_result_uses_engine_and_never_exposes_internal_metrics(
     tmp_path: Path, monkeypatch
@@ -120,6 +131,41 @@ async def test_public_result_marks_price_based_fallback_when_no_boe_row(
     assert result.boe_confidence == "none"
     assert any(warning.startswith("ATENCIÓN") for warning in result.warnings)
     assert any("estimado desde el precio" in warning for warning in result.warnings)
+
+
+@pytest.mark.asyncio
+async def test_no_broad_comparables_hides_savings_and_keeps_final_price(
+    tmp_path: Path, monkeypatch
+) -> None:
+    database = tmp_path / "fiscal.sqlite3"
+    install_boe_dataset(database, parse_boe_xml(FIXTURE.read_bytes()))
+    monkeypatch.setenv("IMPORT_CARS_FISCAL_DATABASE_PATH", str(database))
+
+    result = await calculate_for_customer(
+        PublicCalculationInput(
+            make="Abarth",
+            model="124",
+            version="1.4 Spider",
+            first_registration=date(2018, 5, 1),
+            purchase_price=25_000,
+            fuel="gasolina",
+            displacement_cc=1368,
+            co2_gkm=148,
+            mileage_km=40_000,
+            power_kw=125,
+            transmission="manual",
+            seller_type="particular",
+            autonomous_community="Madrid",
+            municipality="Madrid",
+        ),
+        market_service=NoComparableMarketStub(),
+    )
+
+    assert result.final_price_eur > 0
+    assert result.market_match_level is None
+    assert result.spanish_market_price_eur is None
+    assert result.savings_eur is None
+    assert any("No hay comparables suficientes" in warning for warning in result.warnings)
 
 
 def test_public_input_requires_displacement_for_combustion_vehicle() -> None:

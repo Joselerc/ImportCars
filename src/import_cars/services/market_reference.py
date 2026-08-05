@@ -9,13 +9,13 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-from ..analysis import match_level
+from ..analysis import match_decision, preferred_level_matches
 from ..enrichment.signature import (
-    build_variant_key,
+    build_engine_key,
     build_vehicle_signature,
     normalize_fuel_category,
 )
-from ..filters import FuelType, PowerRange, UnifiedFilters, YearRange
+from ..filters import FuelType, MileageRange, PowerRange, UnifiedFilters, YearRange
 from ..models import NormalizedListing
 from ..scrapers.coches_net import CochesNetScraper
 
@@ -35,6 +35,7 @@ class ComparableCheckAudit(BaseModel):
     target_value: str | float | None
     comparable_value: str | float | None
     status: Literal["used", "not_used", "unavailable"]
+    outcome: Literal["match", "mismatch", "relaxed", "unavailable"] = "unavailable"
     note: str = ""
 
 
@@ -51,6 +52,7 @@ class MarketComparableAudit(BaseModel):
     power_hp: int | None
     displacement_cc: int | None
     match_level: str
+    used_for_price: bool = True
     checks: list[ComparableCheckAudit]
 
 
@@ -66,6 +68,7 @@ class MarketReference(BaseModel):
     confidence: str = "insufficient"
     fetched_at: datetime
     cached: bool = False
+    quality_warning: str | None = None
     criteria: list[MatchCriterionAudit] = Field(default_factory=list)
     comparables: list[MarketComparableAudit] = Field(default_factory=list)
 
@@ -100,7 +103,7 @@ def _criteria_audit(target: NormalizedListing) -> list[MatchCriterionAudit]:
     """Describe la política vigente sin participar en su decisión."""
 
     year = _listing_year(target)
-    variant = build_variant_key(target)
+    variant = build_engine_key(target)
     fuel = normalize_fuel_category(target.fuel_type)
     return [
         _criterion(
@@ -122,15 +125,17 @@ def _criteria_audit(target: NormalizedListing) -> list[MatchCriterionAudit]:
             "Versión / motorización",
             variant if variant != "na" else target.version,
             used=variant != "na",
-            rule="La clave de variante se compara cuando ambos anuncios permiten extraerla.",
-            note="Si un comparable no aporta una variante reconocible, este criterio no puede aplicarse a ese coche.",
+            rule="Misma motorización obligatoria en exact/near; un conflicto conocido se descarta también en broad.",
+            note="Si falta la identidad de motor, el coche solo puede entrar como broad.",
         ),
         _criterion(
             "year",
             "Año",
             year,
             used=year is not None,
-            rule=f"Búsqueda entre {year - 4} y {year + 4}; el nivel final limita la diferencia." if year else "Sin año objetivo.",
+            rule="Límites por nivel: exact ±1, near ±2, broad ±4 años."
+            if year
+            else "Sin año objetivo no se calcula referencia.",
         ),
         _criterion(
             "fuel",
@@ -143,17 +148,17 @@ def _criteria_audit(target: NormalizedListing) -> list[MatchCriterionAudit]:
             "mileage",
             "Kilómetros",
             target.mileage_km,
-            used=False,
-            rule="La política vigente no filtra ni clasifica por kilómetros.",
-            note="Se muestran para revisión, pero todavía no intervienen en el match.",
+            used=target.mileage_km is not None,
+            rule="Filtro obligatorio: exact ±15.000, near ±35.000, broad ±60.000 km.",
+            note="Si falta el kilometraje en cualquiera de los anuncios, no se usa como comparable.",
         ),
         _criterion(
             "transmission",
             "Cambio",
-            target.transmission,
-            used=False,
-            rule="La política vigente no filtra ni clasifica por tipo de cambio.",
-            note="Se muestra para revisión; puede faltar en el anuncio de origen.",
+            target.transmission or target.metadata.source_transmission,
+            used=bool(target.transmission or target.metadata.source_transmission),
+            rule="Exact exige el mismo cambio; near lo prefiere; broad solo lo informa.",
+            note="Nunca se aplica una corrección monetaria por el cambio.",
         ),
         _criterion(
             "power",
@@ -179,6 +184,7 @@ def _check(
     comparable_value: str | float | None,
     *,
     policy_uses: bool,
+    outcome: str = "unavailable",
     note: str = "",
 ) -> ComparableCheckAudit:
     available = target_value not in (None, "", "na") and comparable_value not in (
@@ -193,6 +199,7 @@ def _check(
         target_value=target_value,
         comparable_value=comparable_value,
         status=status,
+        outcome=outcome,
         note=(
             note
             if available
@@ -205,9 +212,12 @@ def _comparable_audit(
     target: NormalizedListing,
     candidate: NormalizedListing,
     level: str,
+    decision,
+    *,
+    used_for_price: bool,
 ) -> MarketComparableAudit:
-    target_variant = build_variant_key(target)
-    candidate_variant = build_variant_key(candidate)
+    target_variant = build_engine_key(target)
+    candidate_variant = build_engine_key(candidate)
     target_year = _listing_year(target)
     candidate_year = _listing_year(candidate)
     return MarketComparableAudit(
@@ -223,39 +233,58 @@ def _comparable_audit(
         power_hp=candidate.power_hp,
         displacement_cc=candidate.engine_displacement_cc,
         match_level=level,
+        used_for_price=used_for_price,
         checks=[
-            _check("make", "Marca", target.make, candidate.make, policy_uses=True),
-            _check("model", "Modelo", target.model, candidate.model, policy_uses=True),
+            _check(
+                "make", "Marca", target.make, candidate.make, policy_uses=True,
+                outcome=decision.checks["make"].outcome,
+                note=decision.checks["make"].note,
+            ),
+            _check(
+                "model", "Modelo", target.model, candidate.model, policy_uses=True,
+                outcome=decision.checks["model"].outcome,
+                note=decision.checks["model"].note,
+            ),
             _check(
                 "version",
-                "Versión",
+                "Motorización / versión",
                 target_variant,
                 candidate_variant,
                 policy_uses=True,
+                outcome=decision.checks["version"].outcome,
+                note=decision.checks["version"].note,
             ),
-            _check("year", "Año", target_year, candidate_year, policy_uses=True),
+            _check(
+                "year", "Año", target_year, candidate_year, policy_uses=True,
+                outcome=decision.checks["year"].outcome,
+                note=decision.checks["year"].note,
+            ),
             _check(
                 "fuel",
                 "Combustible",
                 normalize_fuel_category(target.fuel_type),
                 normalize_fuel_category(candidate.fuel_type),
                 policy_uses=True,
+                outcome=decision.checks["fuel"].outcome,
+                note=decision.checks["fuel"].note,
             ),
             _check(
                 "mileage",
                 "Kilómetros",
                 target.mileage_km,
                 candidate.mileage_km,
-                policy_uses=False,
-                note="Dato visible, no usado por la política actual.",
+                policy_uses=True,
+                outcome=decision.checks["mileage"].outcome,
+                note=decision.checks["mileage"].note,
             ),
             _check(
                 "transmission",
                 "Cambio",
-                target.transmission,
+                target.transmission or target.metadata.source_transmission,
                 candidate.transmission or candidate.metadata.source_transmission,
-                policy_uses=False,
-                note="Dato visible, no usado por la política actual.",
+                policy_uses=level != "broad",
+                outcome=decision.checks["transmission"].outcome,
+                note=decision.checks["transmission"].note,
             ),
             _check(
                 "power",
@@ -263,6 +292,8 @@ def _comparable_audit(
                 target.power_hp,
                 candidate.power_hp,
                 policy_uses=True,
+                outcome="match" if level in {"exact", "near"} else "relaxed",
+                note="La potencia forma parte de la comprobación técnica del motor.",
             ),
             _check(
                 "displacement",
@@ -270,6 +301,8 @@ def _comparable_audit(
                 target.engine_displacement_cc,
                 candidate.engine_displacement_cc,
                 policy_uses=True,
+                outcome="match" if level in {"exact", "near"} else "relaxed",
+                note="La cilindrada forma parte de la comprobación técnica del motor.",
             ),
         ],
     )
@@ -295,7 +328,10 @@ class SpanishMarketReferenceService:
                 "Se necesitan marca y modelo para buscar comparables en España"
             )
 
-        key = build_vehicle_signature(target)
+        key = (
+            f"{build_vehicle_signature(target)}|engine:{build_engine_key(target)}"
+            f"|km:{target.mileage_km if target.mileage_km is not None else 'na'}"
+        )
         now = time.monotonic()
         cached = self._cache.get(key)
         if cached and cached[0] > now:
@@ -317,34 +353,66 @@ class SpanishMarketReferenceService:
             query=filters, limit=filters.page_size
         )
 
-        buckets: dict[str, list[NormalizedListing]] = {
+        buckets: dict[str, list[tuple[NormalizedListing, object]]] = {
             "exact": [],
             "near": [],
             "broad": [],
         }
         for candidate in result.listings:
-            level = match_level(target, candidate)
-            if level:
-                buckets[level].append(candidate)
+            decision = match_decision(target, candidate)
+            if decision.level:
+                buckets[decision.level].append((candidate, decision))
 
         selected_level = next(
             (level for level in ("exact", "near", "broad") if buckets[level]),
             None,
         )
-        selected = buckets[selected_level] if selected_level else []
-        priced = [item for item in selected if item.price_eur is not None]
-        prices = [item.price_eur for item in priced]
+        level_matches = buckets[selected_level] if selected_level else []
+        priced_level = [
+            (item, decision)
+            for item, decision in level_matches
+            if item.price_eur is not None
+        ]
+        priced = (
+            preferred_level_matches(priced_level, selected_level)
+            if selected_level
+            else []
+        )
+        prices = [item.price_eur for item, _decision in priced]
         fetched_at = datetime.now(UTC)
         criteria = _criteria_audit(target)
 
         if not prices:
-            return MarketReference(fetched_at=fetched_at, criteria=criteria)
+            return MarketReference(
+                fetched_at=fetched_at,
+                criteria=criteria,
+                quality_warning=(
+                    "No hay comparables suficientes dentro del nivel broad; "
+                    "no se estima el ahorro."
+                ),
+            )
 
         confidence = {
             "exact": "high",
             "near": "medium",
             "broad": "low",
         }[selected_level]
+        warning_parts = []
+        if selected_level == "broad":
+            warning_parts.append(
+                "El ahorro es orientativo: solo hay comparables broad y no son versiones exactas."
+            )
+        if selected_level == "near" and len(priced) < len(priced_level):
+            warning_parts.append(
+                "En nivel near se priorizaron los anuncios con el mismo cambio; "
+                "los demás quedan visibles pero no entran en la mediana."
+            )
+        if len(prices) < 3:
+            warning_parts.append(
+                f"La muestra usada tiene solo {len(prices)} "
+                f"{'comparable' if len(prices) == 1 else 'comparables'}."
+            )
+        used_ids = {item.listing_id for item, _decision in priced}
         return MarketReference(
             match_level=selected_level,
             sample_size=len(prices),
@@ -354,10 +422,17 @@ class SpanishMarketReferenceService:
             maximum_eur=round(max(prices), 2),
             confidence=confidence,
             fetched_at=fetched_at,
+            quality_warning=" ".join(warning_parts) or None,
             criteria=criteria,
             comparables=[
-                _comparable_audit(target, candidate, selected_level)
-                for candidate in priced
+                _comparable_audit(
+                    target,
+                    candidate,
+                    selected_level,
+                    decision,
+                    used_for_price=candidate.listing_id in used_ids,
+                )
+                for candidate, decision in priced_level
             ],
         )
 
@@ -378,6 +453,13 @@ class SpanishMarketReferenceService:
                 max_power_hp=target.power_hp + tolerance,
             )
 
+        mileage_range = None
+        if target.mileage_km is not None:
+            mileage_range = MileageRange(
+                min_mileage=max(0, target.mileage_km - 60_000),
+                max_mileage=target.mileage_km + 60_000,
+            )
+
         fuel_category = normalize_fuel_category(target.fuel_type)
         fuel_types = None
         try:
@@ -389,6 +471,7 @@ class SpanishMarketReferenceService:
             make=target.make,
             model=target.model,
             year_range=year_range,
+            mileage_range=mileage_range,
             power_range=power_range,
             fuel_types=fuel_types,
             page_size=50,
