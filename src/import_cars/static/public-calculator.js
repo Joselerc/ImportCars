@@ -286,6 +286,11 @@
     unavailable: "Sin dato",
   };
 
+  const marketplaceLabel = (source) => ({
+    coches_net: "coches.net",
+    autoscout24: "AutoScout24",
+  })[source] || source || "Marketplace sin identificar";
+
   const renderAuditMarket = (market) => {
     const panel = byId("audit-market");
     if (!panel || !market) return;
@@ -298,6 +303,7 @@
       ["Rango mínimo–máximo", market.minimum_eur === null ? "—" : `${money(market.minimum_eur)} – ${money(market.maximum_eur)}`],
       ["Comparables", String(market.sample_size || 0)],
       ["Nivel aplicado", market.match_level || "Sin nivel"],
+      ["Fuentes", String(market.source || "coches_net+autoscout24").split("+").map(marketplaceLabel).join(" + ")],
     ].forEach(([label, value]) => {
       const card = document.createElement("div");
       card.className = "audit-stat";
@@ -353,6 +359,7 @@
         ["Combustible", car.fuel || "No consta"],
         ["Cambio", car.transmission || "No consta"],
         ["Versión / motor", car.version || "No consta"],
+        ["Fuente", marketplaceLabel(car.source)],
       ].forEach(([label, value]) => {
         const fact = document.createElement("div");
         fact.className = "comparable-fact";
@@ -366,7 +373,7 @@
       link.href = car.url;
       link.target = "_blank";
       link.rel = "noopener";
-      link.textContent = "Abrir anuncio en coches.net ↗";
+      link.textContent = `Abrir anuncio en ${marketplaceLabel(car.source)} ↗`;
       body.appendChild(link);
       const checks = document.createElement("div");
       checks.className = "audit-checks";
@@ -566,7 +573,7 @@
   };
 
   const calculate = async (button = byId("manual-submit")) => {
-    setStatus("manual-status", "Consultando Hacienda y comparables de coches.net…");
+    setStatus("manual-status", "Consultando Hacienda, coches.net y AutoScout24…");
     setButtonLoading(button, true);
     try {
       const response = await fetch(config.calculationEndpoint || "/api/public/calculate", {

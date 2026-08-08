@@ -106,7 +106,7 @@ def _audit_payload(selected_row_id: int = 101) -> dict:
         "boe_confidence": "manual" if selected_row_id == 202 else "non_conclusive",
         "audit": {
             "market": {
-                "source": "coches_net",
+                "source": "coches_net+autoscout24",
                 "match_level": "near",
                 "sample_size": 1,
                 "average_eur": 24_000,
@@ -120,8 +120,9 @@ def _audit_payload(selected_row_id: int = 101) -> dict:
                 "comparables": [
                     {
                         "listing_id": "es-market-1",
+                        "source": "autoscout24",
                         "title": "PEUGEOT 5008 GTLine 1.6L THP EAT6",
-                        "url": "https://www.coches.net/peugeot-5008-es-market-1",
+                        "url": "https://www.autoscout24.es/anuncios/peugeot-5008-es-market-1",
                         "price_eur": 24_000,
                         "mileage_km": 99_500,
                         "year": 2018,
@@ -254,6 +255,7 @@ def test_audit_rows_expand_and_boe_candidate_recalculates(
     market_comparable.locator("summary").click()
     assert "COINCIDE" in market_comparable.inner_text()
     assert "Diferencia de 17.000 km" in market_comparable.inner_text()
+    assert "AutoScout24" in market_comparable.inner_text()
     assert "nivel cercano" in page.locator("#r_es").inner_text()
 
     selector = page.locator('.boe-select[data-boe-row-id="202"]')

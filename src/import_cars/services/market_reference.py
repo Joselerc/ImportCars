@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 from collections.abc import Callable
 from datetime import UTC, datetime
@@ -14,10 +15,15 @@ from ..enrichment.signature import (
     build_engine_key,
     build_vehicle_signature,
     normalize_fuel_category,
+    normalize_text,
 )
 from ..filters import FuelType, MileageRange, PowerRange, UnifiedFilters, YearRange
-from ..models import NormalizedListing
+from ..models import NormalizedListing, SearchResult
+from ..scrapers.autoscout24 import AutoScout24Scraper
+from ..scrapers.base import BaseScraper
 from ..scrapers.coches_net import CochesNetScraper
+
+logger = logging.getLogger(__name__)
 
 
 class MatchCriterionAudit(BaseModel):
@@ -41,6 +47,7 @@ class ComparableCheckAudit(BaseModel):
 
 class MarketComparableAudit(BaseModel):
     listing_id: str
+    source: str = "coches_net"
     title: str | None
     url: str
     price_eur: float
@@ -222,6 +229,7 @@ def _comparable_audit(
     candidate_year = _listing_year(candidate)
     return MarketComparableAudit(
         listing_id=candidate.listing_id,
+        source=candidate.source,
         title=candidate.title,
         url=str(candidate.url),
         price_eur=float(candidate.price_eur),
@@ -309,16 +317,25 @@ def _comparable_audit(
 
 
 class SpanishMarketReferenceService:
-    """Consulta coches.net bajo demanda y conserva una caché corta en memoria."""
+    """Consulta marketplaces abiertos españoles y combina sus comparables."""
 
     def __init__(
         self,
         *,
         ttl_seconds: int = 900,
-        scraper_factory: Callable[[], CochesNetScraper] = CochesNetScraper,
+        scraper_factory: Callable[[], BaseScraper] | None = None,
+        scraper_factories: tuple[Callable[[], BaseScraper], ...] | None = None,
     ) -> None:
+        if scraper_factory is not None and scraper_factories is not None:
+            raise ValueError("Usa scraper_factory o scraper_factories, no ambos")
         self.ttl_seconds = max(0, ttl_seconds)
-        self.scraper_factory = scraper_factory
+        self.scraper_factories = (
+            scraper_factories
+            if scraper_factories is not None
+            else (scraper_factory,)
+            if scraper_factory is not None
+            else (CochesNetScraper, AutoScout24Scraper)
+        )
         self._cache: dict[str, tuple[float, MarketReference]] = {}
         self._lock = asyncio.Lock()
 
@@ -349,16 +366,20 @@ class SpanishMarketReferenceService:
 
     async def _fetch_reference(self, target: NormalizedListing) -> MarketReference:
         filters = self._build_filters(target)
-        result = await self.scraper_factory().search(
-            query=filters, limit=filters.page_size
+        results = await asyncio.gather(
+            *(self._search_source(factory, filters) for factory in self.scraper_factories)
         )
+        pool = self._deduplicate(
+            [listing for result in results for listing in result.listings]
+        )
+        source = self._source_label(pool)
 
         buckets: dict[str, list[tuple[NormalizedListing, object]]] = {
             "exact": [],
             "near": [],
             "broad": [],
         }
-        for candidate in result.listings:
+        for candidate in pool:
             decision = match_decision(target, candidate)
             if decision.level:
                 buckets[decision.level].append((candidate, decision))
@@ -384,6 +405,7 @@ class SpanishMarketReferenceService:
 
         if not prices:
             return MarketReference(
+                source=source,
                 fetched_at=fetched_at,
                 criteria=criteria,
                 quality_warning=(
@@ -414,6 +436,7 @@ class SpanishMarketReferenceService:
             )
         used_ids = {item.listing_id for item, _decision in priced}
         return MarketReference(
+            source=source,
             match_level=selected_level,
             sample_size=len(prices),
             average_eur=round(sum(prices) / len(prices), 2),
@@ -435,6 +458,78 @@ class SpanishMarketReferenceService:
                 for candidate, decision in priced_level
             ],
         )
+
+    @staticmethod
+    async def _search_source(
+        factory: Callable[[], BaseScraper],
+        filters: UnifiedFilters,
+    ) -> SearchResult:
+        scraper = factory()
+        try:
+            return await scraper.search(query=filters, limit=filters.page_size)
+        except Exception as exc:  # noqa: BLE001 - una fuente no bloquea la otra
+            logger.warning(
+                "No se pudieron obtener comparables desde %s: %s",
+                scraper.__class__.__name__,
+                exc,
+            )
+            return SearchResult(listings=[], total_listings=0, has_next=False)
+
+    @staticmethod
+    def _source_label(listings: list[NormalizedListing]) -> str:
+        present = {listing.source for listing in listings}
+        ordered = [
+            source for source in ("coches_net", "autoscout24") if source in present
+        ]
+        ordered.extend(sorted(present - set(ordered)))
+        return "+".join(ordered) or "coches_net+autoscout24"
+
+    @staticmethod
+    def _deduplicate(listings: list[NormalizedListing]) -> list[NormalizedListing]:
+        """Remove repeated marketplace cards before matching and the median."""
+
+        selected: dict[tuple, NormalizedListing] = {}
+        for listing in listings:
+            year = _listing_year(listing)
+            key = (
+                normalize_text(listing.make),
+                normalize_text(listing.model),
+                year,
+                listing.mileage_km,
+                round(float(listing.price_eur), 2)
+                if listing.price_eur is not None
+                else None,
+                listing.power_hp,
+                normalize_fuel_category(listing.fuel_type),
+                normalize_text(
+                    listing.transmission or listing.metadata.source_transmission
+                ),
+            )
+            current = selected.get(key)
+            if current is None:
+                selected[key] = listing
+                continue
+            current_score = sum(
+                value not in (None, "")
+                for value in (
+                    current.version,
+                    current.engine_displacement_cc,
+                    current.transmission,
+                    current.seller.name if current.seller else None,
+                )
+            )
+            candidate_score = sum(
+                value not in (None, "")
+                for value in (
+                    listing.version,
+                    listing.engine_displacement_cc,
+                    listing.transmission,
+                    listing.seller.name if listing.seller else None,
+                )
+            )
+            if candidate_score > current_score:
+                selected[key] = listing
+        return list(selected.values())
 
     @staticmethod
     def _build_filters(target: NormalizedListing) -> UnifiedFilters:

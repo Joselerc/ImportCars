@@ -181,3 +181,87 @@ async def test_broad_reference_is_explicitly_orientative() -> None:
     assert result.median_eur == 41_000
     assert result.confidence == "low"
     assert "ahorro es orientativo" in result.quality_warning
+
+
+@pytest.mark.asyncio
+async def test_marketplaces_are_combined_and_cross_posted_car_is_deduplicated() -> None:
+    coches_duplicate = listing(
+        "coches-duplicate",
+        source="coches_net",
+        title="BMW X5 xDrive30d",
+        price=40_000,
+    )
+    scout_duplicate = listing(
+        "scout-duplicate",
+        source="autoscout24",
+        title="BMW X5 xDrive30d",
+        price=40_000,
+    )
+    scout_unique = listing(
+        "scout-unique",
+        source="autoscout24",
+        title="BMW X5 xDrive30d",
+        price=44_000,
+        mileage_km=61_000,
+    )
+
+    class CochesStub:
+        async def search(self, *, query, limit):
+            return SearchResult(listings=[coches_duplicate])
+
+    class ScoutStub:
+        async def search(self, *, query, limit):
+            return SearchResult(listings=[scout_duplicate, scout_unique])
+
+    target = listing(
+        "de-1",
+        source="mobile_de",
+        title="BMW X5 xDrive30d",
+        price=30_000,
+    )
+    result = await SpanishMarketReferenceService(
+        ttl_seconds=0,
+        scraper_factories=(CochesStub, ScoutStub),
+    ).get_reference(target)
+
+    assert result.source == "coches_net+autoscout24"
+    assert result.sample_size == 2
+    assert result.median_eur == 42_000
+    assert {item.source for item in result.comparables} == {
+        "coches_net",
+        "autoscout24",
+    }
+
+
+@pytest.mark.asyncio
+async def test_one_marketplace_failure_does_not_hide_the_other_source() -> None:
+    candidate = listing(
+        "scout-only",
+        source="autoscout24",
+        title="BMW X5 xDrive30d",
+        price=41_500,
+    )
+
+    class BrokenCochesStub:
+        async def search(self, *, query, limit):
+            raise RuntimeError("coches.net temporalmente no disponible")
+
+    class ScoutStub:
+        async def search(self, *, query, limit):
+            return SearchResult(listings=[candidate])
+
+    target = listing(
+        "de-1",
+        source="mobile_de",
+        title="BMW X5 xDrive30d",
+        price=30_000,
+    )
+    result = await SpanishMarketReferenceService(
+        ttl_seconds=0,
+        scraper_factories=(BrokenCochesStub, ScoutStub),
+    ).get_reference(target)
+
+    assert result.source == "autoscout24"
+    assert result.sample_size == 1
+    assert result.median_eur == 41_500
+    assert result.comparables[0].source == "autoscout24"
