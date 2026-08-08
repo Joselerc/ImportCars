@@ -10,10 +10,11 @@ from collections import defaultdict, deque
 from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Annotated
+from urllib.parse import parse_qs, urlsplit
 
 import uvicorn
 from fastapi import Depends, FastAPI, HTTPException, Request, status
-from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -24,6 +25,12 @@ from fiscal_engine import es_nuevo_fiscal
 from .enrichment.body_type import normalize_body_type
 from .enrichment.co2_enricher import Co2Enricher
 from .enrichment.signature import normalize_fuel_category, normalize_text
+from .persistence.customer_activity import (
+    calculation_detail,
+    dashboard_data,
+    erase_personal_data,
+    record_calculation,
+)
 from .services import (
     AuditCalculationInput,
     ListingParseError,
@@ -31,10 +38,16 @@ from .services import (
     PublicLeadInput,
     SpanishMarketReferenceService,
     calculate_for_audit,
-    calculate_for_customer,
     damage_risk_warning,
     parse_listing_url,
     save_public_lead,
+)
+from .services.admin_auth import (
+    AdminConfigurationError,
+    AdminSession,
+    authenticate,
+    get_session,
+    revoke_session,
 )
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -45,6 +58,70 @@ app = FastAPI(title="Import Cars Local")
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 internal_security = HTTPBasic(auto_error=False)
+VISITOR_COOKIE = "ic_visitor"
+ADMIN_COOKIE = "ic_admin_session"
+LOGIN_CSRF_COOKIE = "ic_admin_login_csrf"
+
+
+def _cookie_secure(variable: str, *, default: bool) -> bool:
+    value = os.getenv(variable)
+    if value is None:
+        return default
+    return value.strip().casefold() in {"1", "true", "yes", "on"}
+
+
+def _visitor_id(request: Request) -> tuple[str, bool]:
+    current = request.cookies.get(VISITOR_COOKIE)
+    if current and 20 <= len(current) <= 128:
+        return current, False
+    return secrets.token_urlsafe(32), True
+
+
+def _set_visitor_cookie(response, visitor_id: str) -> None:
+    response.set_cookie(
+        VISITOR_COOKIE,
+        visitor_id,
+        max_age=365 * 24 * 60 * 60,
+        httponly=True,
+        secure=_cookie_secure("IMPORT_CARS_VISITOR_COOKIE_SECURE", default=False),
+        samesite="lax",
+        path="/",
+    )
+
+
+def _safe_source_url(value: str | None) -> str | None:
+    if not value:
+        return None
+    candidate = value[:2_000]
+    parsed = urlsplit(candidate)
+    return candidate if parsed.scheme in {"http", "https"} and parsed.netloc else None
+
+
+def _admin_session(request: Request) -> AdminSession | None:
+    return get_session(request.cookies.get(ADMIN_COOKIE))
+
+
+def _admin_redirect_if_missing(request: Request) -> AdminSession | RedirectResponse:
+    session = _admin_session(request)
+    if session is None:
+        return RedirectResponse("/admin/login", status_code=303)
+    return session
+
+
+def _admin_headers(response) -> None:
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["Referrer-Policy"] = "no-referrer"
+    response.headers["Content-Security-Policy"] = (
+        "default-src 'self'; style-src 'self'; script-src 'self'; "
+        "img-src 'self' data:; form-action 'self'; frame-ancestors 'none'"
+    )
+
+
+async def _urlencoded_form(request: Request) -> dict[str, str]:
+    body = (await request.body()).decode("utf-8", errors="replace")
+    return {key: values[-1] for key, values in parse_qs(body).items() if values}
 
 
 def _require_internal_access(
@@ -858,7 +935,7 @@ async def reports(request: Request, _access: None = Depends(_require_internal_ac
 async def calculator(request: Request):
     if request.query_params.get("audit") == "1":
         return RedirectResponse(url="/calculadora/auditoria", status_code=307)
-    return templates.TemplateResponse(
+    response = templates.TemplateResponse(
         request,
         "public_calculator.html",
         {
@@ -868,6 +945,10 @@ async def calculator(request: Request):
             "audit_mode": False,
         },
     )
+    visitor_id, is_new = _visitor_id(request)
+    if is_new:
+        _set_visitor_cookie(response, visitor_id)
+    return response
 
 
 @app.get("/calculadora/auditoria", response_class=HTMLResponse)
@@ -949,14 +1030,32 @@ async def parse_public_listing(
 
 @app.post("/api/public/calculate")
 async def public_calculator_api(
-    request: PublicCalculationInput,
+    request: Request,
+    data: PublicCalculationInput,
     _rate_limit: None = Depends(calculator_rate_limit),
-) -> dict:
-    result = await calculate_for_customer(
-        request,
+) -> JSONResponse:
+    audit_input = AuditCalculationInput.model_validate(data.model_dump())
+    result = await calculate_for_audit(
+        audit_input,
         market_service=market_reference_service,
     )
-    return result.model_dump(mode="json")
+    full_payload = result.model_dump(mode="json")
+    audit = full_payload.pop("audit")
+    visitor_id, is_new = _visitor_id(request)
+    source_url = _safe_source_url(request.headers.get("X-Source-URL"))
+    calculation_id = await asyncio.to_thread(
+        record_calculation,
+        anonymous_id=visitor_id,
+        request_data=data.model_dump(mode="json"),
+        public_result=full_payload,
+        audit=audit,
+        source_url=source_url,
+    )
+    response = JSONResponse(full_payload)
+    response.headers["X-Calculation-ID"] = calculation_id
+    if is_new:
+        _set_visitor_cookie(response, visitor_id)
+    return response
 
 
 @app.post("/api/internal/calculate-audit")
@@ -974,11 +1073,145 @@ async def audit_calculator_api(
 
 @app.post("/api/public/leads")
 async def public_lead_api(
-    request: PublicLeadInput,
+    request: Request,
+    lead: PublicLeadInput,
     _rate_limit: None = Depends(calculator_rate_limit),
 ) -> dict[str, bool]:
-    await asyncio.to_thread(save_public_lead, request)
+    visitor_id, _ = _visitor_id(request)
+    await asyncio.to_thread(save_public_lead, lead, anonymous_id=visitor_id)
     return {"accepted": True}
+
+
+@app.get("/admin/login", response_class=HTMLResponse)
+async def admin_login_page(request: Request):
+    if _admin_session(request):
+        return RedirectResponse("/admin", status_code=303)
+    csrf_token = secrets.token_urlsafe(32)
+    response = templates.TemplateResponse(
+        request,
+        "admin_login.html",
+        {"request": request, "csrf_token": csrf_token, "error": None},
+    )
+    response.set_cookie(
+        LOGIN_CSRF_COOKIE,
+        csrf_token,
+        max_age=600,
+        httponly=True,
+        secure=_cookie_secure("IMPORT_CARS_ADMIN_COOKIE_SECURE", default=True),
+        samesite="strict",
+        path="/admin",
+    )
+    _admin_headers(response)
+    return response
+
+
+@app.post("/admin/login", response_class=HTMLResponse)
+async def admin_login_submit(request: Request):
+    form = await _urlencoded_form(request)
+    csrf_cookie = request.cookies.get(LOGIN_CSRF_COOKIE, "")
+    if not csrf_cookie or not secrets.compare_digest(csrf_cookie, form.get("csrf_token", "")):
+        raise HTTPException(status_code=403, detail="Solicitud de acceso no válida.")
+    error = None
+    try:
+        authenticated = await asyncio.to_thread(
+            authenticate, form.get("username", ""), form.get("password", "")
+        )
+    except AdminConfigurationError as exc:
+        authenticated = None
+        error = str(exc)
+    if authenticated:
+        token, _session = authenticated
+        response = RedirectResponse("/admin", status_code=303)
+        response.set_cookie(
+            ADMIN_COOKIE,
+            token,
+            max_age=int((_session.expires_at - datetime.now(UTC)).total_seconds()),
+            httponly=True,
+            secure=_cookie_secure("IMPORT_CARS_ADMIN_COOKIE_SECURE", default=True),
+            samesite="strict",
+            path="/admin",
+        )
+        response.delete_cookie(LOGIN_CSRF_COOKIE, path="/admin")
+        _admin_headers(response)
+        return response
+    response = templates.TemplateResponse(
+        request,
+        "admin_login.html",
+        {
+            "request": request,
+            "csrf_token": csrf_cookie,
+            "error": error or "Usuario o contraseña incorrectos.",
+        },
+        status_code=401 if error is None else 503,
+    )
+    _admin_headers(response)
+    return response
+
+
+@app.get("/admin", response_class=HTMLResponse)
+async def admin_dashboard(request: Request):
+    session = _admin_redirect_if_missing(request)
+    if isinstance(session, RedirectResponse):
+        return session
+    summary, calculations = await asyncio.to_thread(dashboard_data)
+    response = templates.TemplateResponse(
+        request,
+        "admin_dashboard.html",
+        {
+            "request": request,
+            "session": session,
+            "summary": summary,
+            "calculations": calculations,
+            "csrf_token": session.csrf_token,
+            "erased": request.query_params.get("erased"),
+        },
+    )
+    _admin_headers(response)
+    return response
+
+
+@app.get("/admin/calculations/{calculation_id}", response_class=HTMLResponse)
+async def admin_calculation(request: Request, calculation_id: str):
+    session = _admin_redirect_if_missing(request)
+    if isinstance(session, RedirectResponse):
+        return session
+    detail = await asyncio.to_thread(calculation_detail, calculation_id)
+    if detail is None:
+        raise HTTPException(status_code=404, detail="Cálculo no encontrado")
+    response = templates.TemplateResponse(
+        request,
+        "admin_calculation_detail.html",
+        {"request": request, "session": session, "calculation": detail, "csrf_token": session.csrf_token},
+    )
+    _admin_headers(response)
+    return response
+
+
+@app.post("/admin/privacy/erase")
+async def admin_privacy_erase(request: Request):
+    session = _admin_redirect_if_missing(request)
+    if isinstance(session, RedirectResponse):
+        return session
+    form = await _urlencoded_form(request)
+    if not secrets.compare_digest(session.csrf_token, form.get("csrf_token", "")):
+        raise HTTPException(status_code=403, detail="Token CSRF no válido")
+    erased = await asyncio.to_thread(erase_personal_data, form.get("email", ""))
+    return RedirectResponse(f"/admin?erased={erased}", status_code=303)
+
+
+@app.post("/admin/logout")
+async def admin_logout(request: Request):
+    session = _admin_redirect_if_missing(request)
+    if isinstance(session, RedirectResponse):
+        return session
+    form = await _urlencoded_form(request)
+    if not secrets.compare_digest(session.csrf_token, form.get("csrf_token", "")):
+        raise HTTPException(status_code=403, detail="Token CSRF no válido")
+    await asyncio.to_thread(revoke_session, request.cookies.get(ADMIN_COOKIE))
+    response = RedirectResponse("/admin/login", status_code=303)
+    response.delete_cookie(ADMIN_COOKIE, path="/admin")
+    _admin_headers(response)
+    return response
 
 
 def main() -> None:

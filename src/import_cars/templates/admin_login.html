@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex,nofollow">
+  <title>Acceso de administración · Trayecto</title>
+  <link rel="stylesheet" href="/static/admin.css">
+</head>
+<body class="login-page">
+  <main class="login-shell">
+    <section class="login-context" aria-label="Contexto del panel">
+      <a class="brand login-brand" href="/calculadora"><span class="brand-mark">T</span><span>Trayecto<small>Control</small></span></a>
+      <p class="eyebrow">Centro de operaciones</p>
+      <h1>Decisiones con la fotografía exacta de cada cliente.</h1>
+      <p>Actividad, cálculos fiscales y comparables congelados en el momento de la consulta.</p>
+      <div class="security-note"><span>●</span> Acceso privado · sesión cifrada · sin registro de IP</div>
+    </section>
+    <section class="login-panel">
+      <form method="post" action="/admin/login" class="login-form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <p class="eyebrow">Área restringida</p>
+        <h2>Inicia sesión</h2>
+        <p class="muted">Usa las credenciales del fundador configuradas en el entorno.</p>
+        {% if error %}<div class="alert error" role="alert">{{ error }}</div>{% endif %}
+        <label>Usuario<input name="username" autocomplete="username" required autofocus></label>
+        <label>Contraseña<input name="password" type="password" autocomplete="current-password" required></label>
+        <button class="primary-button" type="submit">Entrar al panel <span>→</span></button>
+      </form>
+    </section>
+  </main>
+</body>
+</html>

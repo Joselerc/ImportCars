@@ -29,6 +29,7 @@
 
   let latestCalculation = null;
   let latestSourceUrl = null;
+  let latestCalculationId = null;
   let selectedBoeRowId = null;
   let co2Source = "user";
   let registrationSource = "user";
@@ -594,11 +595,15 @@
     try {
       const response = await fetch(config.calculationEndpoint || "/api/public/calculate", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...(latestSourceUrl ? { "X-Source-URL": latestSourceUrl } : {}),
+        },
         body: JSON.stringify(manualPayload()),
       });
       const data = await response.json();
       if (!response.ok) throw new Error(detailMessage(data, "No se pudo calcular."));
+      latestCalculationId = response.headers.get("X-Calculation-ID");
       render(data);
       setStatus("manual-status", "Cálculo completado con el motor fiscal oficial.", "ok");
     } catch (error) {
@@ -713,6 +718,7 @@
           vehicle_label: latestCalculation.vehicle_label,
           final_price_eur: latestCalculation.final_price_eur,
           source_url: latestSourceUrl,
+          calculation_id: latestCalculationId,
           consent: byId("lead-consent").checked,
         }),
       });

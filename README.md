@@ -265,6 +265,41 @@ seguimiento periódico de mercado usan bases físicamente separadas; consulta
 `docs/architecture/persistence-boundaries.md`. El dashboard interno conserva
 su autenticación Basic de forma independiente.
 
+## Panel de administración (C1)
+
+La ruta `/admin` es una aplicación privada separada del antiguo dashboard. Usa
+contraseñas Argon2id, sesiones opacas revocables, cookies HttpOnly/SameSite,
+CSRF en todas las acciones y cabeceras contra caché, framing y carga de recursos
+externos. Antes de iniciarla, genera el hash sin escribir la contraseña en
+ningún archivo:
+
+```bash
+python scripts/hash_admin_password.py
+```
+
+Configura `IMPORT_CARS_ADMIN_USERNAME` y
+`IMPORT_CARS_ADMIN_PASSWORD_HASH` con el resultado. En producción HTTPS deja
+`IMPORT_CARS_ADMIN_COOKIE_SECURE=true`; solo para revisar por HTTP local se debe
+usar `false`.
+
+Todos los cálculos públicos quedan registrados en
+`data/customer_activity.sqlite3`, incluidos los anónimos. Cada registro congela
+el resultado, los intermedios fiscales y los comparables exactos mostrados en
+ese instante. No se almacena la IP. Cuando se deja un lead se registra el texto
+y momento del consentimiento y solo se vincula al cálculo del mismo visitante.
+La acción RGPD del panel elimina email/teléfono y rompe ese vínculo, conservando
+la estadística anónima.
+
+Para revisar la interfaz con volumen ficticio se puede ejecutar:
+
+```bash
+python scripts/seed_customer_activity_demo.py --count 16
+```
+
+Estos registros llevan el indicador `simulated` y el panel muestra siempre una
+banda visible «DATOS SIMULADOS». Se eliminan con el mismo script añadiendo
+`--clear --count 0`.
+
 ## 📈 Estadísticas del Proyecto
 
 ### Funcionalidad Completada

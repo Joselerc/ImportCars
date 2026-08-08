@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex,nofollow">
+  <title>{% block title %}Administración{% endblock %} · Trayecto</title>
+  <link rel="stylesheet" href="/static/admin.css">
+</head>
+<body>
+  <aside class="sidebar">
+    <a class="brand" href="/admin"><span class="brand-mark">T</span><span>Trayecto<small>Control</small></span></a>
+    <nav aria-label="Panel de administración">
+      <a class="nav-item active" href="/admin"><span>01</span> Actividad</a>
+      <span class="nav-item disabled"><span>02</span> Embudo <em>C2</em></span>
+      <span class="nav-item disabled"><span>03</span> Mercado <em>C3</em></span>
+      <span class="nav-item disabled"><span>04</span> Inteligencia <em>C4</em></span>
+      <span class="nav-item disabled"><span>05</span> Salud <em>C4</em></span>
+    </nav>
+    <div class="sidebar-foot">
+      <div><span class="status-dot"></span> Sistema operativo</div>
+      <small>Sesión: {{ session.username }}</small>
+      <form method="post" action="/admin/logout">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <button class="link-button" type="submit">Cerrar sesión</button>
+      </form>
+    </div>
+  </aside>
+  <main class="workspace">
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>

@@ -1,0 +1,53 @@
+{% extends "admin_base.html" %}
+{% block title %}Actividad{% endblock %}
+{% block content %}
+  {% if summary.simulated_records %}
+  <div class="simulation-band">DATOS SIMULADOS · {{ summary.simulated_records }} registros de demostración visibles</div>
+  {% endif %}
+  <header class="page-header">
+    <div><p class="eyebrow">Fase C1 · Actividad de clientes</p><h1>Registro de cálculos</h1><p>Cada resultado conserva la fiscalidad y los comparables que vio el cliente.</p></div>
+    <div class="live-chip"><span class="status-dot"></span> Captura activa</div>
+  </header>
+
+  {% if erased is not none %}<div class="alert success">Supresión RGPD completada: {{ erased }} registro(s) anonimizado(s).</div>{% endif %}
+
+  <section class="metrics" aria-label="Resumen de actividad">
+    <article><span>Cálculos</span><strong>{{ summary.calculations }}</strong><small>Todos, también anónimos</small></article>
+    <article><span>Visitantes anónimos</span><strong>{{ summary.anonymous_visitors }}</strong><small>Identificador sin IP</small></article>
+    <article><span>Leads vinculados</span><strong>{{ summary.leads }}</strong><small>Con consentimiento explícito</small></article>
+    <article><span>Precio final medio</span><strong>{% if summary.average_final_price is not none %}{{ "{:,.0f}".format(summary.average_final_price).replace(",", ".") }} €{% else %}—{% endif %}</strong><small>Sobre los cálculos registrados</small></article>
+  </section>
+
+  <section class="panel">
+    <div class="panel-head"><div><p class="eyebrow">Actividad reciente</p><h2>Últimos cálculos</h2></div><span class="record-count">{{ calculations|length }} visibles</span></div>
+    {% if calculations %}
+    <div class="table-scroll"><table>
+      <thead><tr><th>Fecha</th><th>Vehículo</th><th>Precio final</th><th>Ahorro</th><th>Comparables</th><th>Estado</th><th></th></tr></thead>
+      <tbody>
+      {% for item in calculations %}
+        <tr class="{% if item.simulated %}simulated-row{% endif %}">
+          <td><time>{{ item.created_at[:16].replace("T", " · ") }}</time><small>ID {{ item.anonymous_id[-8:] }}</small></td>
+          <td><strong>{{ item.vehicle_label }}</strong><small>{{ item.autonomous_community }} · {{ item.source_mode }}</small></td>
+          <td class="money">{{ "{:,.0f}".format(item.final_price_eur).replace(",", ".") }} €</td>
+          <td>{% if item.savings_eur is not none %}<span class="saving">{{ "{:,.0f}".format(item.savings_eur).replace(",", ".") }} €</span>{% else %}<span class="muted">No fiable</span>{% endif %}</td>
+          <td><span class="level level-{{ item.market_match_level or 'none' }}">{{ item.market_match_level or "sin muestra" }}</span><small>{{ item.market_sample_size }} usados</small></td>
+          <td>{% if item.has_lead %}<span class="lead-chip">Lead</span>{% else %}<span class="anonymous-chip">Anónimo</span>{% endif %}{% if item.warning_count %}<small class="warning-text">{{ item.warning_count }} aviso(s)</small>{% endif %}{% if item.simulated %}<small class="simulation-tag">SIMULADO</small>{% endif %}</td>
+          <td><a class="row-link" href="/admin/calculations/{{ item.id }}" aria-label="Abrir {{ item.vehicle_label }}">→</a></td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table></div>
+    {% else %}
+      <div class="empty-state"><span>00</span><h3>Aún no hay cálculos</h3><p>La primera consulta pública aparecerá aquí automáticamente, incluso sin lead.</p></div>
+    {% endif %}
+  </section>
+
+  <section class="privacy-panel">
+    <div><p class="eyebrow">Privacidad operativa</p><h2>Solicitud de supresión</h2><p>Elimina email y teléfono y desvincula el lead. El cálculo permanece únicamente como estadística anónima.</p></div>
+    <form method="post" action="/admin/privacy/erase">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <label>Email de la solicitud<input type="email" name="email" required placeholder="cliente@ejemplo.com"></label>
+      <button class="secondary-button" type="submit">Anonimizar datos</button>
+    </form>
+  </section>
+{% endblock %}

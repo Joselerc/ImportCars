@@ -1,0 +1,44 @@
+{% extends "admin_base.html" %}
+{% block title %}{{ calculation.vehicle_label }}{% endblock %}
+{% block content %}
+  {% if calculation.simulated %}<div class="simulation-band">DATOS SIMULADOS · este registro no procede de un cliente real</div>{% endif %}
+  <header class="page-header detail-header">
+    <div><a class="back-link" href="/admin">← Volver a actividad</a><p class="eyebrow">Fotografía inmutable · {{ calculation.created_at[:16].replace("T", " · ") }}</p><h1>{{ calculation.vehicle_label }}</h1><p>ID de cálculo {{ calculation.id }}</p></div>
+    <div class="total-block"><span>Precio final</span><strong>{{ "{:,.0f}".format(calculation.final_price_eur).replace(",", ".") }} €</strong>{% if calculation.savings_eur is not none %}<small class="saving">Ahorro {{ "{:,.0f}".format(calculation.savings_eur).replace(",", ".") }} €</small>{% else %}<small>Ahorro no estimado</small>{% endif %}</div>
+  </header>
+
+  <section class="detail-grid">
+    <article class="panel compact"><div class="panel-head"><h2>Entrada del cálculo</h2><span class="level">{{ calculation.source_mode }}</span></div><dl class="facts">
+      <div><dt>Marca / modelo</dt><dd>{{ calculation.make }} {{ calculation.model }}</dd></div>
+      <div><dt>Versión</dt><dd>{{ calculation.version or "No indicada" }}</dd></div>
+      <div><dt>Primera matriculación</dt><dd>{{ calculation.first_registration or "Nuevo sin matricular" }}</dd></div>
+      <div><dt>Precio anunciado</dt><dd>{{ "{:,.0f}".format(calculation.purchase_price_eur).replace(",", ".") }} €</dd></div>
+      <div><dt>Provincia / municipio</dt><dd>{{ calculation.autonomous_community }} · {{ calculation.municipality }}</dd></div>
+      <div><dt>Origen</dt><dd>{% if calculation.source_url %}<a href="{{ calculation.source_url }}" target="_blank" rel="noreferrer">Abrir anuncio ↗</a>{% else %}Formulario manual{% endif %}</dd></div>
+    </dl></article>
+    <article class="panel compact"><div class="panel-head"><h2>Privacidad y vínculo</h2></div>
+      <dl class="facts"><div><dt>Visitante</dt><dd>Anónimo · {{ calculation.anonymous_id[-8:] }}</dd></div>
+      {% if calculation.lead %}<div><dt>Lead</dt><dd>{{ calculation.lead.email }}</dd></div><div><dt>Teléfono</dt><dd>{{ calculation.lead.phone or "No facilitado" }}</dd></div><div><dt>Consentimiento</dt><dd>{{ calculation.lead.consent_at }}</dd></div>{% else %}<div><dt>Datos personales</dt><dd>No vinculados</dd></div>{% endif %}</dl>
+    </article>
+  </section>
+
+  <section class="panel">
+    <div class="panel-head"><div><p class="eyebrow">Resultado fiscal congelado</p><h2>Desglose e intermedios</h2></div><span>{{ calculation.fiscal_snapshot.fiscal_version }}</span></div>
+    <div class="audit-lines">
+    {% for line in calculation.fiscal_snapshot.fiscal_breakdown %}
+      <details><summary><span>{{ line.label }}</span><strong>{{ "{:,.0f}".format(line.amount_eur).replace(",", ".") }} €</strong></summary><div class="formula">{{ line.formula }}</div><dl class="intermediates">{% for value in line.intermediates %}<div><dt>{{ value.label }}</dt><dd>{{ value.value }} {{ value.unit or "" }}{% if value.note %}<small>{{ value.note }}</small>{% endif %}</dd></div>{% endfor %}</dl></details>
+    {% endfor %}
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-head"><div><p class="eyebrow">Mercado español en ese instante</p><h2>Comparables congelados</h2></div><span class="level level-{{ calculation.market_match_level or 'none' }}">{{ calculation.market_match_level or "sin muestra" }} · {{ calculation.market_sample_size }}</span></div>
+    {% set comparables = calculation.market_snapshot.comparables or [] %}
+    {% if comparables %}<div class="cards-grid">{% for car in comparables %}<article class="comparable-card"><div class="card-top"><span>{{ car.source or "marketplace" }}</span>{% if car.used_for_price %}<em>Usado en mediana</em>{% endif %}</div><h3>{{ car.title or car.version or "Comparable" }}</h3><strong>{{ "{:,.0f}".format(car.price_eur).replace(",", ".") if car.price_eur else "—" }} €</strong><dl><div><dt>Año</dt><dd>{{ car.year or "—" }}</dd></div><div><dt>Km</dt><dd>{{ "{:,.0f}".format(car.mileage_km).replace(",", ".") if car.mileage_km else "—" }}</dd></div><div><dt>Combustible</dt><dd>{{ car.fuel or "—" }}</dd></div><div><dt>Cambio</dt><dd>{{ car.transmission or "—" }}</dd></div><div><dt>Batería</dt><dd>{{ car.battery_capacity_kwh or "—" }}{% if car.battery_capacity_kwh %} kWh{% endif %}</dd></div><div><dt>Nivel</dt><dd>{{ car.match_level or "—" }}</dd></div></dl>{% if car.url %}<a href="{{ car.url }}" target="_blank" rel="noreferrer">Ver anuncio congelado ↗</a>{% endif %}</article>{% endfor %}</div>{% else %}<div class="empty-state compact-empty"><h3>Sin comparables fiables</h3><p>El precio final se conservó sin estimación de ahorro.</p></div>{% endif %}
+  </section>
+
+  <section class="detail-grid">
+    <article class="panel compact"><div class="panel-head"><h2>Resolución BOE</h2></div><dl class="facts"><div><dt>Fila seleccionada</dt><dd>{{ calculation.fiscal_snapshot.boe.selected_row_id or "Fallback" }}</dd></div><div><dt>Confianza</dt><dd>{{ calculation.fiscal_snapshot.boe.confidence }}</dd></div><div><dt>Candidatas técnicas</dt><dd>{{ calculation.fiscal_snapshot.boe.technical_candidate_count }}</dd></div><div><dt>CO₂</dt><dd>{{ calculation.fiscal_snapshot.boe.co2_value_gkm }} g/km · {{ calculation.fiscal_snapshot.boe.co2_source }}</dd></div></dl></article>
+    <article class="panel compact"><div class="panel-head"><h2>Tratamiento de IVA</h2></div><dl class="facts"><div><dt>Caso</dt><dd>{{ calculation.fiscal_snapshot.vat.case }}</dd></div><div><dt>Motivo</dt><dd>{{ calculation.fiscal_snapshot.vat.reason }}</dd></div><div><dt>Base</dt><dd>{{ calculation.fiscal_snapshot.vat.tax_base_eur }} €</dd></div><div><dt>IVA español</dt><dd>{{ calculation.fiscal_snapshot.vat.spanish_vat_eur }} €</dd></div></dl></article>
+  </section>
+{% endblock %}

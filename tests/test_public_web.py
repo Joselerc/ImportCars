@@ -34,6 +34,8 @@ async def test_public_page_and_calculation_do_not_require_internal_auth(
     database = tmp_path / "fiscal.sqlite3"
     install_boe_dataset(database, parse_boe_xml(FIXTURE.read_bytes()))
     monkeypatch.setenv("IMPORT_CARS_FISCAL_DATABASE_PATH", str(database))
+    activity_database = tmp_path / "activity.sqlite3"
+    monkeypatch.setenv("IMPORT_CARS_CUSTOMER_DATABASE_PATH", str(activity_database))
     monkeypatch.setenv("IMPORT_CARS_INTERNAL_USERNAME", "operator")
     monkeypatch.setenv("IMPORT_CARS_INTERNAL_PASSWORD", "secret")
     monkeypatch.setattr(webapp, "market_reference_service", MarketStub())
@@ -87,8 +89,21 @@ async def test_public_page_and_calculation_do_not_require_internal_auth(
     }
     assert payload["boe_model_match"] == "124 1.4 Spider"
     assert payload["spanish_market_price_eur"] == 42_000
+    assert response.headers["x-calculation-id"]
     assert "break_even" not in response.text
     assert "potential_margin" not in response.text
+    with sqlite3.connect(activity_database) as connection:
+        stored = connection.execute(
+            """
+            SELECT anonymous_id, public_result_json, fiscal_snapshot_json,
+                   market_snapshot_json
+            FROM customer_calculations
+            """
+        ).fetchone()
+    assert stored is not None
+    assert stored[0]
+    assert '"fiscal_breakdown"' in stored[2]
+    assert '"comparables"' in stored[3]
 
 
 @pytest.mark.asyncio

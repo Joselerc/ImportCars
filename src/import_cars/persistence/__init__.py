@@ -1,5 +1,6 @@
 """Persistence boundaries shared by the web app and background workers."""
 
+from .customer_activity import initialize_customer_database
 from .migrations import Migration, apply_migrations
 from .paths import (
     DEFAULT_CUSTOMER_DATABASE_PATH,
@@ -21,6 +22,7 @@ __all__ = [
     "apply_migrations",
     "customer_database_path",
     "fiscal_database_path",
+    "initialize_customer_database",
     "market_database_path",
     "persistence_paths",
 ]
