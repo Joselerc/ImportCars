@@ -91,6 +91,7 @@ CSV_FIELDS = [
     "potencia_kw",
     "cilindrada_cc",
     "cilindros",
+    "bateria_kwh",
     "cambio",
     "carroceria",
     "clave_motor_matching",
@@ -122,6 +123,10 @@ CSV_FIELDS = [
     "mercado_es_max_eur",
     "ahorro_eur",
     "ahorro_pct",
+    "ahorro_calculado_interno_eur",
+    "ahorro_calculado_interno_pct",
+    "filtro_cordura_activado",
+    "umbral_ahorro_fiable_pct",
     "aviso_calidad_mercado",
     "numero_avisos",
     "avisos",
@@ -262,6 +267,11 @@ async def _run_target(
                     "potencia_kw": listing.power_kw if listing.power_kw is not None else "",
                     "cilindrada_cc": payload["displacement_cc"],
                     "cilindros": listing.cylinders if listing.cylinders is not None else "",
+                    "bateria_kwh": (
+                        listing.battery_capacity_kwh
+                        if listing.battery_capacity_kwh is not None
+                        else ""
+                    ),
                     "cambio": payload.get("transmission") or "",
                     "carroceria": payload.get("body_type") or "",
                     "clave_motor_matching": build_engine_key(listing),
@@ -288,11 +298,31 @@ async def _run_target(
                     "nivel_comparables": result.market_match_level or "",
                     "confianza_mercado": result.market_confidence,
                     "comparables_usados": result.market_sample_size,
-                    "mercado_es_mediana_eur": result.spanish_market_price_eur or "",
+                    "mercado_es_mediana_eur": market_audit.get("median_eur") or "",
                     "mercado_es_min_eur": market_audit.get("minimum_eur") or "",
                     "mercado_es_max_eur": market_audit.get("maximum_eur") or "",
                     "ahorro_eur": result.savings_eur if result.savings_eur is not None else "",
                     "ahorro_pct": result.savings_pct if result.savings_pct is not None else "",
+                    "ahorro_calculado_interno_eur": (
+                        market_audit["savings_sanity_filter"].get(
+                            "calculated_savings_eur"
+                        )
+                        if market_audit.get("savings_sanity_filter")
+                        else ""
+                    ),
+                    "ahorro_calculado_interno_pct": (
+                        market_audit["savings_sanity_filter"].get(
+                            "calculated_savings_pct"
+                        )
+                        if market_audit.get("savings_sanity_filter")
+                        else ""
+                    ),
+                    "filtro_cordura_activado": bool(
+                        market_audit.get("savings_sanity_filter", {}).get("applied")
+                    ),
+                    "umbral_ahorro_fiable_pct": market_audit.get(
+                        "savings_sanity_filter", {}
+                    ).get("threshold_pct", ""),
                     "aviso_calidad_mercado": market_audit.get("quality_warning") or "",
                     "numero_avisos": len(result.warnings),
                     "avisos": " | ".join(result.warnings),

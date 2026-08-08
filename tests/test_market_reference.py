@@ -15,6 +15,8 @@ def listing(
     power_hp: int = 265,
     mileage_km: int = 60_000,
     transmission: str | None = "automatic",
+    fuel: str = "diesel",
+    battery_capacity_kwh: float | None = None,
 ) -> NormalizedListing:
     return NormalizedListing(
         listing_id=listing_id,
@@ -26,11 +28,12 @@ def listing(
         model="X5",
         price_eur=price,
         first_registration=Registration(year=2020, month=6),
-        fuel_type="diesel",
+        fuel_type=fuel,
         mileage_km=mileage_km,
         transmission=transmission,
         power_hp=power_hp,
         engine_displacement_cc=2_993,
+        battery_capacity_kwh=battery_capacity_kwh,
     )
 
 
@@ -181,6 +184,57 @@ async def test_broad_reference_is_explicitly_orientative() -> None:
     assert result.median_eur == 41_000
     assert result.confidence == "low"
     assert "ahorro es orientativo" in result.quality_warning
+
+
+@pytest.mark.asyncio
+async def test_battery_mismatch_is_broad_and_auditable() -> None:
+    candidate = listing(
+        "es-ev3",
+        source="autoscout24",
+        title="Kia EV3 Standard Range",
+        price=34_000,
+        power_hp=204,
+        fuel="electric",
+        battery_capacity_kwh=58.3,
+    ).model_copy(
+        update={
+            "make": "Kia",
+            "model": "EV3",
+            "engine_displacement_cc": 0,
+        }
+    )
+
+    class ScraperStub:
+        async def search(self, *, query, limit):
+            return SearchResult(listings=[candidate])
+
+    target = listing(
+        "de-ev3",
+        source="mobile_de",
+        title="Kia EV3 Long Range",
+        price=30_000,
+        power_hp=204,
+        fuel="electric",
+        battery_capacity_kwh=81.4,
+    ).model_copy(
+        update={
+            "make": "Kia",
+            "model": "EV3",
+            "engine_displacement_cc": 0,
+        }
+    )
+    result = await SpanishMarketReferenceService(
+        ttl_seconds=0,
+        scraper_factory=ScraperStub,
+    ).get_reference(target)
+
+    assert result.match_level == "broad"
+    assert result.comparables[0].battery_capacity_kwh == 58.3
+    battery_check = next(
+        check for check in result.comparables[0].checks if check.key == "battery"
+    )
+    assert battery_check.outcome == "relaxed"
+    assert "capacidad de batería" in result.quality_warning.casefold()
 
 
 @pytest.mark.asyncio

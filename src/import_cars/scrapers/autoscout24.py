@@ -11,6 +11,7 @@ from urllib.parse import quote, urlencode
 import httpx
 from selectolax.parser import HTMLParser
 
+from ..enrichment.battery import extract_battery_capacity_kwh
 from ..enrichment.signature import normalize_fuel_category
 from ..filters import UnifiedFilters
 from ..matching import listing_matches_filters
@@ -238,6 +239,7 @@ class AutoScout24Scraper(BaseScraper):
                 power_hp=power_hp,
                 power_kw=power_kw,
                 engine_displacement_cc=_displacement(vehicle, fuel),
+                battery_capacity_kwh=extract_battery_capacity_kwh(item),
                 images=list(item.get("images") or [])[:8],
                 location=(
                     Location(

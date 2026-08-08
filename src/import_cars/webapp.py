@@ -715,6 +715,7 @@ def _parsed_listing_payload(listing) -> dict:
         "co2_gkm": _co2_value(listing.model_dump()),
         "mileage_km": listing.mileage_km,
         "power_kw": listing.power_kw,
+        "battery_capacity_kwh": listing.battery_capacity_kwh,
         "body_type": normalize_body_type(listing.body_type),
         "transmission": _normalized_transmission(listing.transmission),
         "seller_type": seller_type,

@@ -120,6 +120,7 @@ async def test_structured_next_payload_becomes_normalized_listing(
     assert listing.power_kw == 150
     assert listing.power_hp == 204
     assert listing.engine_displacement_cc is None
+    assert listing.battery_capacity_kwh == 81.4
     assert listing.seller.name == "Concesionario abierto"
 
 
@@ -156,6 +157,7 @@ def test_hybrid_litre_displacement_is_derived_but_battery_size_is_not() -> None:
     )
 
     assert hybrid.engine_displacement_cc == 1_000
+    assert hybrid.battery_capacity_kwh is None
     assert hybrid.fuel_type == "Híbrido"
     assert electric.engine_displacement_cc is None
-
+    assert electric.battery_capacity_kwh == 58.3

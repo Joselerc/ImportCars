@@ -48,6 +48,20 @@ class NoComparableMarketStub:
         )
 
 
+class ImplausibleMarketStub:
+    async def get_reference(self, target):
+        return MarketReference(
+            match_level="exact",
+            sample_size=5,
+            median_eur=100_000,
+            average_eur=100_000,
+            minimum_eur=95_000,
+            maximum_eur=105_000,
+            confidence="high",
+            fetched_at=datetime.now(UTC),
+        )
+
+
 @pytest.mark.asyncio
 async def test_public_result_uses_engine_and_never_exposes_internal_metrics(
     tmp_path: Path, monkeypatch
@@ -165,7 +179,84 @@ async def test_no_broad_comparables_hides_savings_and_keeps_final_price(
     assert result.market_match_level is None
     assert result.spanish_market_price_eur is None
     assert result.savings_eur is None
-    assert any("No hay comparables suficientes" in warning for warning in result.warnings)
+    assert any("ahorro fiable" in warning for warning in result.warnings)
+
+
+@pytest.mark.asyncio
+async def test_implausible_savings_are_hidden_but_preserved_in_audit(
+    tmp_path: Path, monkeypatch
+) -> None:
+    database = tmp_path / "fiscal.sqlite3"
+    install_boe_dataset(database, parse_boe_xml(FIXTURE.read_bytes()))
+    monkeypatch.setenv("IMPORT_CARS_FISCAL_DATABASE_PATH", str(database))
+    monkeypatch.setenv("IMPORT_CARS_MAX_RELIABLE_SAVINGS_PCT", "35")
+
+    result = await calculate_for_audit(
+        AuditCalculationInput(
+            make="Abarth",
+            model="124",
+            version="1.4 Spider",
+            first_registration=date(2018, 5, 1),
+            purchase_price=25_000,
+            fuel="gasolina",
+            displacement_cc=1368,
+            cylinders=4,
+            co2_gkm=148,
+            mileage_km=40_000,
+            power_kw=125,
+            transmission="manual",
+            seller_type="particular",
+            autonomous_community="Madrid",
+            municipality="Madrid",
+        ),
+        market_service=ImplausibleMarketStub(),
+    )
+
+    assert result.final_price_eur > 0
+    assert result.spanish_market_price_eur is None
+    assert result.savings_eur is None
+    assert result.savings_pct is None
+    assert any("ahorro fiable" in warning for warning in result.warnings)
+    sanity = result.audit.market["savings_sanity_filter"]
+    assert sanity["applied"] is True
+    assert sanity["threshold_pct"] == 35
+    assert sanity["calculated_savings_eur"] > 0
+    assert sanity["calculated_savings_pct"] > 35
+
+
+@pytest.mark.asyncio
+async def test_savings_sanity_threshold_is_configurable(
+    tmp_path: Path, monkeypatch
+) -> None:
+    database = tmp_path / "fiscal.sqlite3"
+    install_boe_dataset(database, parse_boe_xml(FIXTURE.read_bytes()))
+    monkeypatch.setenv("IMPORT_CARS_FISCAL_DATABASE_PATH", str(database))
+    monkeypatch.setenv("IMPORT_CARS_MAX_RELIABLE_SAVINGS_PCT", "100")
+
+    result = await calculate_for_audit(
+        AuditCalculationInput(
+            make="Abarth",
+            model="124",
+            version="1.4 Spider",
+            first_registration=date(2018, 5, 1),
+            purchase_price=25_000,
+            fuel="gasolina",
+            displacement_cc=1368,
+            cylinders=4,
+            co2_gkm=148,
+            mileage_km=40_000,
+            power_kw=125,
+            transmission="manual",
+            seller_type="particular",
+            autonomous_community="Madrid",
+            municipality="Madrid",
+        ),
+        market_service=ImplausibleMarketStub(),
+    )
+
+    assert result.savings_eur is not None
+    assert result.savings_pct is not None
+    assert result.audit.market["savings_sanity_filter"]["applied"] is False
 
 
 def test_public_input_requires_displacement_for_combustion_vehicle() -> None:

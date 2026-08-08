@@ -32,6 +32,8 @@ def normalize_fuel_category(value: str | None) -> str:
         return normalized
 
     tokens = set(normalized.split("_"))
+    if "phev" in tokens:
+        return "phev"
     if tokens & {"lpg", "glp", "autogas", "flussiggas"}:
         return "lpg"
     if (
@@ -173,6 +175,7 @@ def build_vehicle_signature(listing: NormalizedListing) -> str:
             normalize_fuel_category(listing.fuel_type),
             _normalize_number(listing.power_hp),
             _normalize_number(listing.engine_displacement_cc),
+            _normalize_number(listing.battery_capacity_kwh),
             normalize_text(listing.transmission),
         ]
     )

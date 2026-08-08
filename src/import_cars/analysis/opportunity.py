@@ -12,6 +12,8 @@ from ..enrichment.signature import (
 )
 from ..models import NormalizedListing
 
+BATTERY_MATCH_TOLERANCE_KWH = 5.0
+
 
 def _listing_year(listing: NormalizedListing) -> int | None:
     return (
@@ -199,9 +201,34 @@ def match_decision(
         and target_transmission == candidate_transmission
     )
 
-    if exact_motor and year_delta <= 1 and mileage_delta <= 15_000 and transmission_matches:
+    battery_required = target_fuel in {"electric", "phev"}
+    target_battery = target.battery_capacity_kwh
+    candidate_battery = candidate.battery_capacity_kwh
+    battery_delta = (
+        abs(target_battery - candidate_battery)
+        if target_battery is not None and candidate_battery is not None
+        else None
+    )
+    battery_matches = (
+        not battery_required
+        or battery_delta is not None
+        and battery_delta <= BATTERY_MATCH_TOLERANCE_KWH
+    )
+
+    if (
+        exact_motor
+        and year_delta <= 1
+        and mileage_delta <= 15_000
+        and transmission_matches
+        and battery_matches
+    ):
         level = "exact"
-    elif near_motor and year_delta <= 2 and mileage_delta <= 35_000:
+    elif (
+        near_motor
+        and year_delta <= 2
+        and mileage_delta <= 35_000
+        and battery_matches
+    ):
         level = "near"
     elif year_delta <= 4 and mileage_delta <= 60_000:
         level = "broad"
@@ -248,6 +275,28 @@ def match_decision(
         transmission_outcome,
         transmission_note,
     )
+    if not battery_required:
+        battery_outcome = "unavailable"
+        battery_note = "La batería no interviene en vehículos no eléctricos/PHEV."
+    elif battery_delta is None:
+        battery_outcome = "unavailable"
+        battery_note = (
+            "Falta la capacidad de batería en uno de los anuncios; "
+            "solo puede alcanzar nivel broad."
+        )
+    elif battery_matches:
+        battery_outcome = "match"
+        battery_note = (
+            f"Diferencia de {battery_delta:.1f} kWh; tolerancia máxima "
+            f"±{BATTERY_MATCH_TOLERANCE_KWH:.0f} kWh."
+        )
+    else:
+        battery_outcome = "relaxed" if level == "broad" else "mismatch"
+        battery_note = (
+            f"Baterías incompatibles: diferencia de {battery_delta:.1f} kWh; "
+            "solo se admite como broad orientativo."
+        )
+    checks["battery"] = CriterionDecision(battery_outcome, battery_note)
     return ComparableMatchDecision(level, checks)
 
 

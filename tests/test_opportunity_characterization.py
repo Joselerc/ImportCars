@@ -2,7 +2,11 @@ from datetime import UTC, datetime
 
 import pytest
 
-from import_cars.analysis.opportunity import apply_opportunity_analysis, match_level
+from import_cars.analysis.opportunity import (
+    apply_opportunity_analysis,
+    match_decision,
+    match_level,
+)
 from import_cars.models import NormalizedListing, Registration, Seller
 
 
@@ -19,6 +23,7 @@ def listing(
     seller_type: str = "dealer",
     mileage_km: int = 60_000,
     transmission: str | None = "automatic",
+    battery_capacity_kwh: float | None = None,
 ) -> NormalizedListing:
     return NormalizedListing(
         listing_id=listing_id,
@@ -35,6 +40,7 @@ def listing(
         engine_displacement_cc=displacement_cc,
         mileage_km=mileage_km,
         transmission=transmission,
+        battery_capacity_kwh=battery_capacity_kwh,
         seller=Seller(type=seller_type),
     )
 
@@ -223,6 +229,73 @@ def test_exact_requires_same_transmission_but_near_allows_mismatch() -> None:
     )
 
     assert match_level(target, manual) == "near"
+
+
+@pytest.mark.parametrize(
+    ("candidate_battery", "expected_level", "expected_outcome"),
+    [
+        (77.0, "exact", "match"),
+        (58.3, "broad", "relaxed"),
+        (None, "broad", "unavailable"),
+    ],
+)
+def test_electric_exact_and_near_require_equivalent_battery_capacity(
+    candidate_battery: float | None,
+    expected_level: str,
+    expected_outcome: str,
+) -> None:
+    target = listing(
+        "de-ev3",
+        source="mobile_de",
+        title="Kia EV3 Air Long Range",
+        price=31_000,
+        fuel="electric",
+        power_hp=204,
+        displacement_cc=0,
+        battery_capacity_kwh=81.4,
+    ).model_copy(update={"make": "Kia", "model": "EV3"})
+    candidate = listing(
+        "es-ev3",
+        source="autoscout24",
+        title="Kia EV3 Air Long Range",
+        price=36_000,
+        fuel="electric",
+        power_hp=204,
+        displacement_cc=0,
+        battery_capacity_kwh=candidate_battery,
+    ).model_copy(update={"make": "Kia", "model": "EV3"})
+
+    decision = match_decision(target, candidate)
+
+    assert decision.level == expected_level
+    assert decision.checks["battery"].outcome == expected_outcome
+
+
+def test_phev_near_requires_equivalent_battery_capacity() -> None:
+    target = listing(
+        "de-phev",
+        source="mobile_de",
+        title="BMW X5 xDrive50e",
+        price=60_000,
+        fuel="phev",
+        power_hp=489,
+        displacement_cc=2_998,
+        mileage_km=40_000,
+        battery_capacity_kwh=25.7,
+    )
+    candidate = listing(
+        "es-phev",
+        source="coches_net",
+        title="BMW X5 xDrive50e",
+        price=70_000,
+        fuel="phev",
+        power_hp=489,
+        displacement_cc=2_998,
+        mileage_km=60_000,
+        battery_capacity_kwh=18.0,
+    )
+
+    assert match_level(target, candidate) == "broad"
 
 
 def test_named_engine_family_conflict_is_rejected_even_from_broad() -> None:

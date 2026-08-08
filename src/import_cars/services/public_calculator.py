@@ -23,6 +23,12 @@ from ..fiscal_data import resolver_diagnostico_valor_tablas
 from ..models import NormalizedListing, Registration, Seller
 from .market_reference import SpanishMarketReferenceService
 
+DEFAULT_MAX_RELIABLE_SAVINGS_PCT = 35.0
+UNRELIABLE_SAVINGS_MESSAGE = (
+    "No hemos podido estimar un ahorro fiable para este coche; "
+    "solo mostramos el precio final."
+)
+
 
 class PublicCalculationInput(BaseModel):
     make: str = Field(min_length=1, max_length=80)
@@ -50,6 +56,7 @@ class PublicCalculationInput(BaseModel):
     co2_gkm: float | None = Field(None, ge=0, le=1_000)
     mileage_km: int | None = Field(None, ge=0, le=5_000_000)
     power_kw: float | None = Field(None, ge=0, le=2_000)
+    battery_capacity_kwh: float | None = Field(None, ge=1, le=250)
     body_type: Literal[
         "turismo",
         "familiar",
@@ -182,6 +189,18 @@ def damage_risk_warning(
     )
 
 
+def _max_reliable_savings_pct() -> float:
+    raw_value = os.getenv(
+        "IMPORT_CARS_MAX_RELIABLE_SAVINGS_PCT",
+        str(DEFAULT_MAX_RELIABLE_SAVINGS_PCT),
+    )
+    try:
+        value = float(raw_value)
+    except ValueError:
+        return DEFAULT_MAX_RELIABLE_SAVINGS_PCT
+    return value if value > 0 else DEFAULT_MAX_RELIABLE_SAVINGS_PCT
+
+
 def _co2_context(data: PublicCalculationInput) -> tuple[float | None, str, float]:
     """Resolve effective CO2, its auditable provenance and confidence."""
 
@@ -227,6 +246,7 @@ def _market_target(data: PublicCalculationInput) -> NormalizedListing:
         power_kw=int(data.power_kw) if data.power_kw is not None else None,
         power_hp=round(data.power_kw * 1.35962) if data.power_kw is not None else None,
         engine_displacement_cc=data.displacement_cc,
+        battery_capacity_kwh=data.battery_capacity_kwh,
         cylinders=data.cylinders,
         body_type=data.body_type,
         transmission=data.transmission,
@@ -314,6 +334,14 @@ async def _calculate(
         precio_mercado_es=market_price,
     )
 
+    savings_threshold_pct = _max_reliable_savings_pct()
+    raw_savings_eur = result.ahorro_absoluto
+    raw_savings_pct = result.ahorro_pct
+    savings_sanity_applied = (
+        raw_savings_pct is not None
+        and abs(raw_savings_pct) > savings_threshold_pct
+    )
+
     warnings = list(result.avisos)
     if boe_audit.warning:
         warnings.append(boe_audit.warning)
@@ -350,6 +378,10 @@ async def _calculate(
                 f"La muestra usada tiene solo {market.sample_size} "
                 f"{'comparable' if market.sample_size == 1 else 'comparables'}."
             )
+    if market_price is None and market_warning is None:
+        market_quality_warning = UNRELIABLE_SAVINGS_MESSAGE
+    if savings_sanity_applied:
+        market_quality_warning = UNRELIABLE_SAVINGS_MESSAGE
     if market_quality_warning:
         warnings.append(market_quality_warning)
     if market_price is not None and data.purchase_price < market_price * 0.55:
@@ -364,9 +396,21 @@ async def _calculate(
             f"· {'nuevo sin matricular' if data.unregistered_new else fiscal_registration.year}"
         ),
         final_price_eur=round(result.coste_cliente_final, 2),
-        spanish_market_price_eur=round(market_price, 2) if market_price is not None else None,
-        savings_eur=round(result.ahorro_absoluto, 2) if result.ahorro_absoluto is not None else None,
-        savings_pct=round(result.ahorro_pct, 2) if result.ahorro_pct is not None else None,
+        spanish_market_price_eur=(
+            round(market_price, 2)
+            if market_price is not None and not savings_sanity_applied
+            else None
+        ),
+        savings_eur=(
+            round(raw_savings_eur, 2)
+            if raw_savings_eur is not None and not savings_sanity_applied
+            else None
+        ),
+        savings_pct=(
+            round(raw_savings_pct, 2)
+            if raw_savings_pct is not None and not savings_sanity_applied
+            else None
+        ),
         market_sample_size=market.sample_size if market else 0,
         market_match_level=market.match_level if market else None,
         market_confidence=market.confidence if market else "unavailable",
@@ -402,6 +446,20 @@ async def _calculate(
                 "confidence": market.confidence if market else "unavailable",
                 "cached": market.cached if market else False,
                 "quality_warning": market_quality_warning or market_warning,
+                "savings_sanity_filter": {
+                    "applied": savings_sanity_applied,
+                    "threshold_pct": savings_threshold_pct,
+                    "calculated_savings_eur": (
+                        round(raw_savings_eur, 2)
+                        if raw_savings_eur is not None
+                        else None
+                    ),
+                    "calculated_savings_pct": (
+                        round(raw_savings_pct, 2)
+                        if raw_savings_pct is not None
+                        else None
+                    ),
+                },
                 "criteria": [
                     criterion.model_dump(mode="json")
                     for criterion in market.criteria

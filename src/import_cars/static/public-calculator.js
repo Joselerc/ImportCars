@@ -32,6 +32,7 @@
   let selectedBoeRowId = null;
   let co2Source = "user";
   let registrationSource = "user";
+  let batteryCapacityKwh = null;
 
   const breakdownHelp = {
     precio: "Es el precio publicado por el vendedor en Alemania, antes de transporte e impuestos españoles.",
@@ -131,6 +132,7 @@
       co2_gkm: numeric("m_co2"),
       mileage_km: numeric("m_km"),
       power_kw: numeric("m_kw"),
+      battery_capacity_kwh: batteryCapacityKwh,
       body_type: byId("m_body").value || null,
       transmission: byId("m_transmission")?.value || null,
       seller_type: byId("m_seller").value,
@@ -149,6 +151,7 @@
   };
 
   const fillManual = (listing) => {
+    batteryCapacityKwh = listing.battery_capacity_kwh ?? null;
     const values = {
       m_make: listing.make,
       m_model: listing.model,
@@ -304,6 +307,18 @@
       ["Comparables", String(market.sample_size || 0)],
       ["Nivel aplicado", market.match_level || "Sin nivel"],
       ["Fuentes", String(market.source || "coches_net+autoscout24").split("+").map(marketplaceLabel).join(" + ")],
+      [
+        "Filtro de cordura",
+        market.savings_sanity_filter?.applied
+          ? `Activado (±${market.savings_sanity_filter.threshold_pct} %)`
+          : `No activado (±${market.savings_sanity_filter?.threshold_pct ?? 35} %)`,
+      ],
+      [
+        "Ahorro calculado interno",
+        market.savings_sanity_filter?.calculated_savings_eur === null || market.savings_sanity_filter?.calculated_savings_eur === undefined
+          ? "—"
+          : `${money(market.savings_sanity_filter.calculated_savings_eur)} (${market.savings_sanity_filter.calculated_savings_pct} %)`,
+      ],
     ].forEach(([label, value]) => {
       const card = document.createElement("div");
       card.className = "audit-stat";
@@ -358,6 +373,7 @@
         ["Año", car.year ?? "No consta"],
         ["Combustible", car.fuel || "No consta"],
         ["Cambio", car.transmission || "No consta"],
+        ["Batería", car.battery_capacity_kwh === null || car.battery_capacity_kwh === undefined ? "No consta" : `${car.battery_capacity_kwh} kWh`],
         ["Versión / motor", car.version || "No consta"],
         ["Fuente", marketplaceLabel(car.source)],
       ].forEach(([label, value]) => {
@@ -499,9 +515,9 @@
     const levelLabel = levelLabels[data.market_match_level] || "sin nivel";
     if (data.savings_eur === null || data.spanish_market_price_eur === null) {
       savingsCard.classList.add("unavailable");
-      savingsLabel.textContent = "Ahorro aún no disponible";
+      savingsLabel.textContent = "Ahorro no estimable";
       byId("r_save").textContent = "—";
-      byId("r_es").textContent = "No hay comparables suficientes para estimar el ahorro; solo mostramos el precio final.";
+      byId("r_es").textContent = "No hemos podido estimar un ahorro fiable para este coche; solo mostramos el precio final.";
     } else if (data.savings_eur >= 0) {
       savingsCard.classList.add("positive");
       savingsLabel.textContent = data.market_match_level === "broad" ? "Ahorro orientativo" : "Te ahorras";
@@ -613,6 +629,11 @@
   byId("m_price").addEventListener("input", () => {
     byId("m_price_net").value = "";
     byId("m_vat_deductible").value = "false";
+  });
+  ["m_make", "m_model", "m_version", "m_fuel"].forEach((id) => {
+    byId(id).addEventListener("input", () => {
+      batteryCapacityKwh = null;
+    });
   });
 
   byId("url-submit").addEventListener("click", async (event) => {

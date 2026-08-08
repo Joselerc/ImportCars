@@ -11,6 +11,7 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 from ..analysis import match_decision, preferred_level_matches
+from ..analysis.opportunity import BATTERY_MATCH_TOLERANCE_KWH
 from ..enrichment.signature import (
     build_engine_key,
     build_vehicle_signature,
@@ -58,6 +59,7 @@ class MarketComparableAudit(BaseModel):
     transmission: str | None
     power_hp: int | None
     displacement_cc: int | None
+    battery_capacity_kwh: float | None = None
     match_level: str
     used_for_price: bool = True
     checks: list[ComparableCheckAudit]
@@ -181,6 +183,21 @@ def _criteria_audit(target: NormalizedListing) -> list[MatchCriterionAudit]:
             used=target.engine_displacement_cc is not None,
             rule="Tolerancia por nivel cuando ambos anuncios tienen el dato; máximo absoluto de 500 cc.",
         ),
+        _criterion(
+            "battery",
+            "Capacidad de batería",
+            target.battery_capacity_kwh,
+            used=(
+                fuel in {"electric", "phev"}
+                and target.battery_capacity_kwh is not None
+            ),
+            rule=(
+                f"Eléctricos/PHEV: exact y near exigen batería dentro de "
+                f"±{BATTERY_MATCH_TOLERANCE_KWH:.0f} kWh; sin dato o fuera del margen, "
+                "solo broad."
+            ),
+            note="No interviene en vehículos de combustión no enchufables.",
+        ),
     ]
 
 
@@ -240,6 +257,7 @@ def _comparable_audit(
         transmission=candidate.transmission or candidate.metadata.source_transmission,
         power_hp=candidate.power_hp,
         displacement_cc=candidate.engine_displacement_cc,
+        battery_capacity_kwh=candidate.battery_capacity_kwh,
         match_level=level,
         used_for_price=used_for_price,
         checks=[
@@ -311,6 +329,16 @@ def _comparable_audit(
                 policy_uses=True,
                 outcome="match" if level in {"exact", "near"} else "relaxed",
                 note="La cilindrada forma parte de la comprobación técnica del motor.",
+            ),
+            _check(
+                "battery",
+                "Capacidad de batería",
+                target.battery_capacity_kwh,
+                candidate.battery_capacity_kwh,
+                policy_uses=normalize_fuel_category(target.fuel_type)
+                in {"electric", "phev"},
+                outcome=decision.checks["battery"].outcome,
+                note=decision.checks["battery"].note,
             ),
         ],
     )
@@ -424,6 +452,18 @@ class SpanishMarketReferenceService:
             warning_parts.append(
                 "El ahorro es orientativo: solo hay comparables broad y no son versiones exactas."
             )
+            battery_checks = [
+                decision.checks.get("battery")
+                for _item, decision in priced_level
+            ]
+            if any(
+                check is not None and check.outcome in {"relaxed", "unavailable"}
+                for check in battery_checks
+            ):
+                warning_parts.append(
+                    "La capacidad de batería no coincide o no está disponible; "
+                    "estos anuncios no pueden tratarse como equivalentes exactos."
+                )
         if selected_level == "near" and len(priced) < len(priced_level):
             warning_parts.append(
                 "En nivel near se priorizaron los anuncios con el mismo cambio; "
@@ -500,6 +540,7 @@ class SpanishMarketReferenceService:
                 if listing.price_eur is not None
                 else None,
                 listing.power_hp,
+                listing.battery_capacity_kwh,
                 normalize_fuel_category(listing.fuel_type),
                 normalize_text(
                     listing.transmission or listing.metadata.source_transmission

@@ -12,6 +12,7 @@ from ..data import (
     COCHES_NET_TRANSMISSION_TYPES,
     get_cochesnet_model_id_by_name,
 )
+from ..enrichment.battery import extract_battery_capacity_kwh
 from ..filters import FilterTranslator, UnifiedFilters
 from ..matching import listing_matches_filters
 from ..models import (
@@ -434,6 +435,7 @@ class CochesNetScraper(BaseScraper):
                 power_kw=int(data.get("hp") / 1.36) if data.get("hp") else None,
                 fuel_type=data.get("fuelType"),
                 engine_displacement_cc=data.get("cubicCapacity"),
+                battery_capacity_kwh=extract_battery_capacity_kwh(data),
                 images=self._extract_images(data),
                 location=location,
                 seller=seller,

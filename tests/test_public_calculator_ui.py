@@ -116,6 +116,12 @@ def _audit_payload(selected_row_id: int = 101) -> dict:
                 "confidence": "medium",
                 "cached": False,
                 "quality_warning": None,
+                "savings_sanity_filter": {
+                    "applied": False,
+                    "threshold_pct": 35,
+                    "calculated_savings_eur": 4325,
+                    "calculated_savings_pct": 18.02,
+                },
                 "criteria": [],
                 "comparables": [
                     {
@@ -131,6 +137,7 @@ def _audit_payload(selected_row_id: int = 101) -> dict:
                         "transmission": "automatic",
                         "power_hp": 165,
                         "displacement_cc": 1598,
+                        "battery_capacity_kwh": None,
                         "match_level": "near",
                         "used_for_price": True,
                         "checks": [
@@ -256,6 +263,8 @@ def test_audit_rows_expand_and_boe_candidate_recalculates(
     assert "COINCIDE" in market_comparable.inner_text()
     assert "Diferencia de 17.000 km" in market_comparable.inner_text()
     assert "AutoScout24" in market_comparable.inner_text()
+    assert "Batería" in market_comparable.inner_text()
+    assert "Filtro de cordura" in page.locator("#audit-summary").inner_text()
     assert "nivel cercano" in page.locator("#r_es").inner_text()
 
     selector = page.locator('.boe-select[data-boe-row-id="202"]')
@@ -320,4 +329,67 @@ def test_damage_warning_coexists_with_missing_co2_prompt(
     warning_box = page.locator("#preflight-risk-box")
     assert warning_box.is_visible()
     assert "dañado o accidentado" in warning_box.inner_text()
+    page.close()
+
+
+def test_url_flow_preserves_battery_capacity_for_market_matching(
+    calculator_server: str,
+    browser: Browser,
+) -> None:
+    page: Page = browser.new_page()
+    listing = {
+        "source": "mobile_de",
+        "source_url": "https://suchen.mobile.de/auto-inserat/kia-ev3/460264044.html",
+        "title": "Kia EV3 Earth Long Range",
+        "make": "Kia",
+        "model": "EV3",
+        "version": "Earth Long Range",
+        "first_registration": "2025-04",
+        "registration_source": "listing",
+        "purchase_price": 35_000,
+        "purchase_price_net": None,
+        "vat_deductible": False,
+        "unregistered_new": False,
+        "fuel": "electrico",
+        "displacement_cc": 0,
+        "cylinders": None,
+        "co2_gkm": 0,
+        "mileage_km": 12_000,
+        "power_kw": 150,
+        "battery_capacity_kwh": 81.4,
+        "body_type": "suv",
+        "transmission": "automatic",
+        "seller_type": "profesional_margen",
+        "co2_confirmed": True,
+        "co2_source": "electric_zero",
+        "damaged": False,
+        "damage_condition": None,
+        "missing_fields": [],
+        "co2_prompt": None,
+        "registration_prompt": None,
+        "risk_warnings": [],
+    }
+    page.route(
+        "**/api/public/parse-listing",
+        lambda route: route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=json.dumps(listing),
+        ),
+    )
+
+    def calculate_route(route) -> None:
+        route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=json.dumps(_audit_payload()),
+        )
+
+    page.route("**/api/public/calculate", calculate_route)
+    page.goto(f"{calculator_server}/calculadora")
+    page.locator("#urlInput").fill(listing["source_url"])
+    with page.expect_request("**/api/public/calculate") as request_info:
+        page.locator("#url-submit").click()
+
+    assert request_info.value.post_data_json["battery_capacity_kwh"] == 81.4
     page.close()
