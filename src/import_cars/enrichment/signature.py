@@ -18,30 +18,40 @@ def normalize_text(value: str | None) -> str:
 
 
 def normalize_fuel_category(value: str | None) -> str:
+    """Collapse noisy marketplace labels into one stable fuel category.
+
+    mobile.de appends compatibility and energy-source notes to the base fuel
+    (for example ``Gasolina, Indicado para E10``).  Classification must inspect
+    semantic markers instead of requiring the complete label to equal a small
+    alias table.  More specific categories intentionally run first: a hybrid
+    label contains both ``gasolina`` and ``eléctrico`` but is still a hybrid.
+    """
+
     normalized = normalize_text(value)
-    mapping = {
-        "benzin": "gasoline",
-        "gasolina": "gasoline",
-        "petrol": "gasoline",
-        "diesel": "diesel",
-        "diesel_mild_hybrid": "hybrid_diesel",
-        "di_esel": "diesel",
-        "electrico": "electric",
-        "elektrisch": "electric",
-        "electric": "electric",
-        "hybrid": "hybrid",
-        "hibrido": "hybrid",
-        "hybrid_gasoline": "hybrid_gasoline",
-        "hybrid_petrol": "hybrid_gasoline",
-        "hibrido_gasolina": "hybrid_gasoline",
-        "hybrid_diesel": "hybrid_diesel",
-        "hibrido_diesel": "hybrid_diesel",
-        "lpg": "lpg",
-        "glp": "lpg",
-        "cng": "cng",
-        "gnc": "cng",
-    }
-    return mapping.get(normalized, normalized)
+    if normalized == "na":
+        return normalized
+
+    tokens = set(normalized.split("_"))
+    if tokens & {"lpg", "glp", "autogas", "flussiggas"}:
+        return "lpg"
+    if tokens & {"cng", "gnc", "erdgas", "methan", "metano"}:
+        return "cng"
+    if tokens & {"hydrogen", "hydrogenium", "hidrogeno", "wasserstoff"}:
+        return "hydrogen"
+
+    hybrid = bool(tokens & {"hybrid", "hibrido"}) or "mild_hybrid" in normalized
+    if hybrid:
+        if tokens & {"enchufable", "plugin", "plug"} or "plug_in" in normalized:
+            return "phev"
+        return "hybrid"
+
+    if normalized == "di_esel" or any("diesel" in token for token in tokens):
+        return "diesel"
+    if tokens & {"gasolina", "gasoline", "benzin", "petrol"}:
+        return "gasoline"
+    if tokens & {"electrico", "elektrisch", "electric", "electricity", "strom"}:
+        return "electric"
+    return "other"
 
 
 def _normalize_number(value: Any | None) -> str:

@@ -34,6 +34,13 @@ _FUEL_CODE_ALIASES = {
     "ELC": "ELC",
     "ELECTRICO": "ELC",
     "ELECTRIC": "ELC",
+    "HYBRID": "HYBRID",
+    "HIBRIDO": "HYBRID",
+    "HYBRID GASOLINE": "HYBRID",
+    "HYBRID DIESEL": "HYBRID",
+    "GYE": "HYBRID",
+    "DYE": "HYBRID",
+    "PHEV": "PHEV",
 }
 
 _AUTOMATIC_MARKERS = {

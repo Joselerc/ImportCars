@@ -182,33 +182,38 @@ async def _run_target(
     candidates: int,
     mobile: MobileDeHttpScraper,
     market: SpanishMarketReferenceService,
+    listing_id: str | None = None,
 ) -> dict[str, Any]:
     row = _empty_row(test_number, make, model)
     failures: list[str] = []
-    try:
-        summaries = await asyncio.to_thread(
-            mobile.search,
-            UnifiedFilters(
-                make=make,
-                model=model,
-                country_code="DE",
-                price_range=PriceRange(min_price=3_000, max_price=75_000),
-                year_range=YearRange(min_year=2014, max_year=2025),
-                mileage_range=MileageRange(max_mileage=200_000),
-                page_size=candidates,
-            ),
-            candidates,
-        )
-    except Exception as exc:  # noqa: BLE001 - the report must retain source failures
-        row["estado"] = "error_busqueda_mobile"
-        row["detalle_incidencia"] = f"{type(exc).__name__}: {exc}"
-        return row
-
-    for summary in summaries.listings:
+    if listing_id:
+        candidate_ids = [listing_id]
+    else:
         try:
-            listing = await asyncio.to_thread(mobile.get_listing, summary.listing_id)
+            summaries = await asyncio.to_thread(
+                mobile.search,
+                UnifiedFilters(
+                    make=make,
+                    model=model,
+                    country_code="DE",
+                    price_range=PriceRange(min_price=3_000, max_price=75_000),
+                    year_range=YearRange(min_year=2014, max_year=2025),
+                    mileage_range=MileageRange(max_mileage=200_000),
+                    page_size=candidates,
+                ),
+                candidates,
+            )
+        except Exception as exc:  # noqa: BLE001 - retain source failures
+            row["estado"] = "error_busqueda_mobile"
+            row["detalle_incidencia"] = f"{type(exc).__name__}: {exc}"
+            return row
+        candidate_ids = [summary.listing_id for summary in summaries.listings]
+
+    for candidate_id in candidate_ids:
+        try:
+            listing = await asyncio.to_thread(mobile.get_listing, candidate_id)
             if listing is None:
-                failures.append(f"{summary.listing_id}: detalle no disponible")
+                failures.append(f"{candidate_id}: detalle no disponible")
                 continue
             payload, missing = await asyncio.to_thread(_candidate_payload, listing)
             if missing:
@@ -297,7 +302,7 @@ async def _run_target(
             )
             return row
         except Exception as exc:  # noqa: BLE001 - try another real ad and report why
-            failures.append(f"{summary.listing_id}: {type(exc).__name__}: {exc}")
+            failures.append(f"{candidate_id}: {type(exc).__name__}: {exc}")
 
     row["estado"] = "sin_anuncio_calculable"
     row["detalle_incidencia"] = " | ".join(failures[:12]) or "La búsqueda no devolvió anuncios"
@@ -324,9 +329,18 @@ def _validate_csv(path: Path) -> None:
         raise RuntimeError("La numeración de las pruebas no es correlativa")
 
 
-async def _main(output: Path, candidates: int) -> int:
+async def _main(output: Path, candidates: int, input_csv: Path | None = None) -> int:
     mobile = MobileDeHttpScraper()
     market = SpanishMarketReferenceService(ttl_seconds=0)
+    baseline_rows: list[dict[str, str]] | None = None
+    if input_csv:
+        with input_csv.open("r", encoding="utf-8-sig", newline="") as handle:
+            baseline_rows = list(csv.DictReader(handle))
+        if len(baseline_rows) != len(TARGETS):
+            raise RuntimeError(
+                f"La matriz base debe contener {len(TARGETS)} filas, no "
+                f"{len(baseline_rows)}"
+            )
     rows: list[dict[str, Any]] = []
     for index, (make, model) in enumerate(TARGETS, start=1):
         print(f"[{index:02d}/{len(TARGETS)}] {make} {model}", flush=True)
@@ -337,6 +351,7 @@ async def _main(output: Path, candidates: int) -> int:
             candidates=candidates,
             mobile=mobile,
             market=market,
+            listing_id=(baseline_rows[index - 1]["id_mobile_de"] if baseline_rows else None),
         )
         rows.append(row)
         _write_csv(output, rows)
@@ -374,10 +389,15 @@ def main() -> int:
         default=Path("exports/validacion_real_35_modelos.csv"),
     )
     parser.add_argument("--candidates", type=int, default=20)
+    parser.add_argument(
+        "--input-csv",
+        type=Path,
+        help="Reprocesa exactamente los IDs de una matriz anterior.",
+    )
     args = parser.parse_args()
     if len(TARGETS) != 35:
         raise RuntimeError(f"La matriz debe contener 35 casos, no {len(TARGETS)}")
-    return asyncio.run(_main(args.output, max(1, args.candidates)))
+    return asyncio.run(_main(args.output, max(1, args.candidates), args.input_csv))
 
 
 if __name__ == "__main__":

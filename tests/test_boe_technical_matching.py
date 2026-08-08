@@ -190,3 +190,65 @@ def test_electric_model_resolves_without_displacement_or_cylinders(
     assert audit.resolution is not None
     assert audit.resolution.row_id == 42093
     assert audit.resolution.value_eur == 41_100
+
+
+def test_hybrid_fuel_family_matches_official_gasoline_electric_code(
+    tmp_path: Path,
+) -> None:
+    database = _peugeot_database(tmp_path / "fiscal.sqlite3")
+    with sqlite3.connect(database) as connection:
+        connection.execute(
+            """
+            INSERT INTO boe_valores VALUES (
+                42095, 1, 'passenger_vehicle', 'PEUGEOT',
+                '5008 Hybrid 180 e-EAT8', 2024, NULL,
+                1598, 4, 'GyE', 110, 12.1, 180, 40100
+            )
+            """
+        )
+
+    audit = resolver_diagnostico_valor_tablas(
+        "Peugeot",
+        "5008 Hybrid 180 e-EAT8",
+        2025,
+        displacement_cc=1598,
+        power_kw=110,
+        fuel_code="Hybrid",
+        cylinders=4,
+        transmission="Automático",
+        database_path=database,
+    )
+
+    assert audit.technical_candidate_count == 1
+    assert audit.resolution is not None
+    assert audit.resolution.row_id == 42095
+
+
+def test_plug_in_hybrid_matches_official_phev_code(tmp_path: Path) -> None:
+    database = _peugeot_database(tmp_path / "fiscal.sqlite3")
+    with sqlite3.connect(database) as connection:
+        connection.execute(
+            """
+            INSERT INTO boe_valores VALUES (
+                42096, 1, 'passenger_vehicle', 'PEUGEOT',
+                '5008 Hybrid PHEV 225 e-EAT8', 2024, NULL,
+                1598, 4, 'PHEV', 133, 12.1, 225, 44500
+            )
+            """
+        )
+
+    audit = resolver_diagnostico_valor_tablas(
+        "Peugeot",
+        "5008 Hybrid PHEV 225 e-EAT8",
+        2025,
+        displacement_cc=1598,
+        power_kw=133,
+        fuel_code="PHEV",
+        cylinders=4,
+        transmission="Automático",
+        database_path=database,
+    )
+
+    assert audit.technical_candidate_count == 1
+    assert audit.resolution is not None
+    assert audit.resolution.row_id == 42096

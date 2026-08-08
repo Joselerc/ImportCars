@@ -143,8 +143,8 @@ _BOE_FUEL_CODES = {
     "gasolina": "G",
     "diesel": "D",
     "electrico": "Elc",
-    "hibrido": "H",
-    "phev": "H",
+    "hibrido": "Hybrid",
+    "phev": "PHEV",
     "glp": "GLP",
     "otro": "Otro",
 }
