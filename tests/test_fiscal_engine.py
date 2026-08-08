@@ -431,6 +431,14 @@ def test_new_vehicle_uses_advertised_net_price_before_any_calculation() -> None:
     assert result.base_iva == 45_840.34
     assert result.origen_base_iva == "neto_anuncio"
     assert result.iva == pytest.approx(45_840.34 * 0.21)
+    assert result.precio_adquisicion == 45_840.34
+    price_line = next(line for line in result.desglose_cliente if line.clave == "precio")
+    assert price_line.importe == 45_840.34
+    assert "IVA español" in price_line.nota
+    assert price_line.importe + result.iva == pytest.approx(45_840.34 * 1.21)
+    assert result.coste_cliente_final == pytest.approx(
+        sum(line.importe for line in result.desglose_cliente)
+    )
 
 
 def test_new_professional_gross_price_derives_net_by_dividing_1_19() -> None:
@@ -457,6 +465,10 @@ def test_new_professional_gross_price_derives_net_by_dividing_1_19() -> None:
     assert result.base_iva == pytest.approx(37_890 / 1.19)
     assert result.origen_base_iva == "bruto_dividido_1_19"
     assert result.iva == pytest.approx((37_890 / 1.19) * 0.21)
+    assert result.precio_adquisicion == pytest.approx(37_890 / 1.19)
+    price_line = next(line for line in result.desglose_cliente if line.clave == "precio")
+    assert price_line.importe == pytest.approx(37_890 / 1.19)
+    assert price_line.importe + result.iva == pytest.approx((37_890 / 1.19) * 1.21)
 
 
 @pytest.mark.parametrize(
@@ -489,6 +501,7 @@ def test_new_without_deductible_german_vat_uses_untouched_price(
     assert result.origen_base_iva == "precio_sin_iva_desglosable"
     assert result.iva == 6_300
     assert result.itp == 0
+    assert result.precio_adquisicion == 30_000
 
 
 def test_roi_company_uses_net_purchase_and_zero_net_vat_cost() -> None:

@@ -1,5 +1,9 @@
 # Diagnóstico de ahorros extremos — 8 de agosto de 2026
 
+> Estado posterior: la causa C descrita en este informe quedó corregida en el
+> commit dedicado al doble conteo de IVA. La causa A continúa pendiente y el
+> Bloque C sigue pausado. Véase `informe_correccion_doble_iva_2026-08-08.md`.
+
 ## Alcance y método
 
 Este informe reproduce los comparables de coches.net que alimentaron los cinco
@@ -101,4 +105,3 @@ Hay además una causa C independiente que amplifica todos estos porcentajes en l
 coches nuevos con IVA desglosable: la composición del precio final suma el IVA
 español al bruto alemán. Quedan anotadas A y C para una decisión posterior. No se
 ha alterado ninguna de esas dos lógicas durante este diagnóstico.
-

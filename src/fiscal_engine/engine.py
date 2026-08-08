@@ -308,7 +308,7 @@ def _calcular_iva_detalle(
         "Vehículo fiscalmente nuevo: IVA español del 21% sobre el precio neto aplicable.",
         base,
         source,
-        vehiculo.precio_compra,
+        base,
     )
 
 
@@ -598,8 +598,12 @@ def _construir_desglose(
             "Precio del coche",
             detalle_iva.precio_adquisicion,
             nota=(
-                "Precio neto para comprador empresa ROI"
-                if detalle_iva.precio_adquisicion != vehiculo.precio_compra
+                "Precio neto; el IVA español se suma una sola vez por separado"
+                if detalle_iva.caso == "nuevo_iva_espanol"
+                and detalle_iva.precio_adquisicion != vehiculo.precio_compra
+                else "Precio neto para comprador empresa ROI"
+                if detalle_iva.caso == "empresa_roi"
+                and detalle_iva.precio_adquisicion != vehiculo.precio_compra
                 else ""
             ),
             formula="Precio aplicable a la adquisición según el régimen del comprador",

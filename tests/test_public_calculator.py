@@ -288,4 +288,7 @@ async def test_public_new_vehicle_uses_advertised_net_price_and_exposes_vat_audi
     assert result.audit.vat["tax_base_eur"] == 45_840.34
     assert result.audit.vat["tax_base_source"] == "neto_anuncio"
     assert result.audit.vat["case"] == "nuevo_iva_espanol"
+    assert result.audit.vat["acquisition_price_eur"] == 45_840.34
+    price = next(row for row in result.breakdown if row["key"] == "precio")
+    assert price["amount_eur"] == 45_840.34
     assert result.audit.registration["source"] == "unregistered_new"
