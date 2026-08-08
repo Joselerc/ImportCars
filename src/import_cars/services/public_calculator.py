@@ -33,7 +33,18 @@ class PublicCalculationInput(BaseModel):
     purchase_price_net: float | None = Field(None, gt=0, le=5_000_000)
     vat_deductible: bool = False
     unregistered_new: bool = False
-    fuel: Literal["gasolina", "diesel", "electrico", "hibrido", "phev", "glp", "otro"]
+    fuel: Literal[
+        "gasolina",
+        "diesel",
+        "electrico",
+        "hibrido",
+        "phev",
+        "glp",
+        "gnc",
+        "hidrogeno",
+        "etanol",
+        "otro",
+    ]
     displacement_cc: int = Field(ge=0, le=20_000)
     cylinders: int | None = Field(None, ge=1, le=24)
     co2_gkm: float | None = Field(None, ge=0, le=1_000)
@@ -72,7 +83,7 @@ class PublicCalculationInput(BaseModel):
             and self.first_registration > datetime.now(UTC).date()
         ):
             raise ValueError("La primera matriculacion no puede estar en el futuro")
-        if self.fuel != "electrico" and self.displacement_cc == 0:
+        if self.fuel not in {"electrico", "hidrogeno"} and self.displacement_cc == 0:
             raise ValueError("La cilindrada es obligatoria para vehiculos no electricos")
         return self
 
@@ -125,6 +136,9 @@ _FUEL_MAP = {
     "hibrido": Combustible.HIBRIDO,
     "phev": Combustible.HIBRIDO_ENCHUFABLE,
     "glp": Combustible.GLP,
+    "gnc": Combustible.OTRO,
+    "hidrogeno": Combustible.OTRO,
+    "etanol": Combustible.OTRO,
     "otro": Combustible.OTRO,
 }
 
@@ -145,7 +159,10 @@ _BOE_FUEL_CODES = {
     "electrico": "Elc",
     "hibrido": "Hybrid",
     "phev": "PHEV",
-    "glp": "GLP",
+    "glp": "Gas",
+    "gnc": "Gas",
+    "hidrogeno": "H",
+    "etanol": "Flex fuel",
     "otro": "Otro",
 }
 

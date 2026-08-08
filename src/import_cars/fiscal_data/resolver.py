@@ -14,6 +14,7 @@ from ..persistence.paths import DEFAULT_FISCAL_DATABASE_PATH, fiscal_database_pa
 
 DEFAULT_DATABASE_PATH = DEFAULT_FISCAL_DATABASE_PATH
 PRICE_SPREAD_HIGH_CONFIDENCE = 0.08
+POWER_TOLERANCE_KW = 2.0
 # Mejora futura: resolver primero por una tabla de equivalencias KBA (HSN/TSN)
 # -> versión BOE. mobile.de publica ese código, pero el anexo fiscal no lo incluye.
 
@@ -40,7 +41,19 @@ _FUEL_CODE_ALIASES = {
     "HYBRID DIESEL": "HYBRID",
     "GYE": "HYBRID",
     "DYE": "HYBRID",
+    "SYE": "HYBRID",
     "PHEV": "PHEV",
+    "S": "GAS",
+    "GLP": "GAS",
+    "LPG": "GAS",
+    "GNC": "GAS",
+    "CNG": "GAS",
+    "H": "H",
+    "HYDROGEN": "H",
+    "HIDROGENO": "H",
+    "M": "FLEX_FUEL",
+    "ETHANOL": "FLEX_FUEL",
+    "ETANOL": "FLEX_FUEL",
 }
 
 _AUTOMATIC_MARKERS = {
@@ -59,6 +72,15 @@ _AUTOMATIC_MARKERS = {
     "powershift",
     "steptronic",
     "tiptronic",
+}
+
+_HYBRID_QUERY_MARKERS = {
+    "hybrid",
+    "hibrido",
+    "hev",
+    "mhev",
+    "mild hybrid",
+    "etsi",
 }
 
 
@@ -178,6 +200,24 @@ def _model_head(value: str) -> str:
         return tokens[1]
     numeric = re.fullmatch(r"(\d+)[a-z]", tokens[0])
     return numeric.group(1) if numeric else tokens[0]
+
+
+def _fuel_for_query(fuel_code: str | None, query: str) -> str | None:
+    """Correct a combustion-only source label when the version says hybrid.
+
+    mobile.de sometimes labels mild hybrids as plain petrol/diesel.  BOE rows
+    correctly use GyE/DyE, both canonicalized as HYBRID.  The override is only
+    allowed when the model/version text itself contains an explicit hybrid
+    marker, so an ordinary combustion car never crosses fuel families.
+    """
+
+    canonical = _fuel_code(fuel_code)
+    if canonical not in {"G", "D"}:
+        return canonical
+    query_tokens = set(query.split())
+    if query_tokens & (_HYBRID_QUERY_MARKERS - {"mild hybrid"}) or "mild hybrid" in query:
+        return "HYBRID"
+    return canonical
 
 
 def _boe_transmission(model_type: str) -> str:
@@ -314,13 +354,13 @@ def resolver_diagnostico_valor_tablas(
     required = {
         "displacement_cc": displacement_cc,
         "power_kw": power_kw,
-        "fuel_code": _fuel_code(fuel_code),
+        "fuel_code": _fuel_for_query(fuel_code, query),
     }
-    electric = required["fuel_code"] == "ELC"
+    no_displacement = required["fuel_code"] in {"ELC", "H"}
     missing = tuple(
         key
         for key, value in required.items()
-        if value is None and not (key == "displacement_cc" and electric)
+        if value is None and not (key == "displacement_cc" and no_displacement)
     )
     if missing:
         return _empty_audit(
@@ -339,16 +379,16 @@ def resolver_diagnostico_valor_tablas(
         row
         for row in base_rows
         if (
-            (electric and row[4] in (None, 0))
+            (no_displacement and row[4] in (None, 0))
             or (
-                not electric
+                not no_displacement
                 and displacement_cc is not None
                 and row[4] == int(displacement_cc)
             )
         )
         and _fuel_code(row[6]) == required["fuel_code"]
         and row[7] is not None
-        and float(row[7]) == float(power_kw)
+        and abs(float(row[7]) - float(power_kw)) <= POWER_TOLERANCE_KW
     ]
     if not technical_rows:
         return _empty_audit(
@@ -357,8 +397,8 @@ def resolver_diagnostico_valor_tablas(
             year=year,
             base_candidate_count=len(base_rows),
             warning=(
-                "Ninguna fila del BOE coincide exactamente en cilindrada, potencia, "
-                "combustible y periodo comercial."
+                "Ninguna fila del BOE coincide en cilindrada y combustible exactos, "
+                f"potencia dentro de ±{POWER_TOLERANCE_KW:g} kW y periodo comercial."
             ),
         )
 
@@ -368,7 +408,7 @@ def resolver_diagnostico_valor_tablas(
         transmission_kind = _boe_transmission(row[1])
         compatible = (
             transmission_kind == requested_transmission
-            if requested_transmission is not None and _fuel_code(row[6]) != "ELC"
+            if requested_transmission is not None and _fuel_code(row[6]) not in {"ELC", "H"}
             else None
         )
         cylinders_compatible = (

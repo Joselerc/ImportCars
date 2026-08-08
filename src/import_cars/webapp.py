@@ -665,6 +665,9 @@ def _parsed_listing_payload(listing) -> dict:
         "hybrid": "hibrido",
         "phev": "phev",
         "lpg": "glp",
+        "cng": "gnc",
+        "hydrogen": "hidrogeno",
+        "ethanol": "etanol",
     }
     public_fuel = fuel_map.get(fuel, "otro")
     is_private = listing.seller and listing.seller.type == "private"
@@ -704,7 +707,9 @@ def _parsed_listing_payload(listing) -> dict:
         "unregistered_new": listing.unregistered_new,
         "fuel": public_fuel,
         "displacement_cc": (
-            0 if public_fuel == "electrico" else listing.engine_displacement_cc
+            0
+            if public_fuel in {"electrico", "hidrogeno"}
+            else listing.engine_displacement_cc
         ),
         "cylinders": listing.cylinders,
         "co2_gkm": _co2_value(listing.model_dump()),
@@ -736,7 +741,10 @@ def _parsed_listing_payload(listing) -> dict:
         field
         for field in required
         if not payload[field]
-        and not (field == "displacement_cc" and payload["fuel"] == "electrico")
+        and not (
+            field == "displacement_cc"
+            and payload["fuel"] in {"electrico", "hidrogeno"}
+        )
         and not (field == "first_registration" and payload["unregistered_new"])
     ]
     if payload["fuel"] != "electrico" and payload["co2_gkm"] is None:

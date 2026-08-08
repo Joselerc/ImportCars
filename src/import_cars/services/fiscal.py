@@ -31,6 +31,9 @@ _FUEL_MAP = {
     "hybrid": Combustible.HIBRIDO,
     "phev": Combustible.HIBRIDO_ENCHUFABLE,
     "lpg": Combustible.GLP,
+    "cng": Combustible.OTRO,
+    "hydrogen": Combustible.OTRO,
+    "ethanol": Combustible.OTRO,
 }
 
 
@@ -91,7 +94,10 @@ def vehicle_from_listing(listing: NormalizedListing) -> Vehiculo:
             "electric": "Elc",
             "hybrid": "Hybrid",
             "phev": "PHEV",
-            "lpg": "GLP",
+            "lpg": "Gas",
+            "cng": "Gas",
+            "hydrogen": "H",
+            "ethanol": "Flex fuel",
         }.get(normalized_fuel),
         cylinders=listing.cylinders,
         transmission=listing.transmission,

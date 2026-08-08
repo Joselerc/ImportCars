@@ -34,10 +34,15 @@ def normalize_fuel_category(value: str | None) -> str:
     tokens = set(normalized.split("_"))
     if tokens & {"lpg", "glp", "autogas", "flussiggas"}:
         return "lpg"
-    if tokens & {"cng", "gnc", "erdgas", "methan", "metano"}:
+    if (
+        tokens & {"cng", "gnc", "erdgas", "methan", "metano"}
+        or "gas_natural" in normalized
+    ):
         return "cng"
     if tokens & {"hydrogen", "hydrogenium", "hidrogeno", "wasserstoff"}:
         return "hydrogen"
+    if tokens & {"ethanol", "etanol", "flexifuel"} or "flex_fuel" in normalized:
+        return "ethanol"
 
     hybrid = bool(tokens & {"hybrid", "hibrido"}) or "mild_hybrid" in normalized
     if hybrid:

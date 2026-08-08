@@ -150,6 +150,50 @@ def test_no_technical_candidate_returns_none_and_explicit_warning(tmp_path: Path
     assert "Ninguna fila" in audit.warning
 
 
+def test_power_filter_accepts_two_kw_but_rejects_three_kw(
+    tmp_path: Path,
+) -> None:
+    database = _peugeot_database(tmp_path / "fiscal.sqlite3")
+
+    within_tolerance = _resolve(database, power_kw=119)
+    outside_tolerance = _resolve(database, power_kw=118)
+
+    assert within_tolerance.technical_candidate_count == 4
+    assert within_tolerance.resolution is not None
+    assert outside_tolerance.technical_candidate_count == 0
+    assert outside_tolerance.resolution is None
+
+
+def test_plain_gasoline_etsi_query_matches_official_gye_row(tmp_path: Path) -> None:
+    database = _peugeot_database(tmp_path / "fiscal.sqlite3")
+    with sqlite3.connect(database) as connection:
+        connection.execute(
+            """
+            INSERT INTO boe_valores VALUES (
+                42097, 1, 'passenger_vehicle', 'PEUGEOT',
+                '5008 1.5 eTSI DSG', 2024, NULL,
+                1498, 4, 'GyE', 110, 12.1, 150, 40500
+            )
+            """
+        )
+
+    audit = resolver_diagnostico_valor_tablas(
+        "Peugeot",
+        "5008 1.5 eTSI DSG",
+        2025,
+        displacement_cc=1498,
+        power_kw=110,
+        fuel_code="Gasolina",
+        cylinders=4,
+        transmission="Automático",
+        database_path=database,
+    )
+
+    assert audit.technical_candidate_count == 1
+    assert audit.resolution is not None
+    assert audit.resolution.row_id == 42097
+
+
 def test_missing_cylinders_never_blocks_an_exact_technical_match(tmp_path: Path) -> None:
     audit = _resolve(
         _peugeot_database(tmp_path / "fiscal.sqlite3"),
